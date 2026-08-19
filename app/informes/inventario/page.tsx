@@ -1,0 +1,109 @@
+import Link from "next/link";
+import { AppShell } from "@/components/app-shell";
+import { PrintButton } from "@/components/print-button";
+import { requireAdmin } from "@/lib/auth/require-admin";
+
+type Relation<T> = T | T[] | null;
+type ReportAsset = {
+  id: string;
+  inventory_code: string | null;
+  name: string | null;
+  asset_type: string | null;
+  brand: string | null;
+  model: string | null;
+  serial_number: string | null;
+  quantity: number;
+  area: string | null;
+  is_disposed: boolean;
+  family_id: string;
+  status_id: string | null;
+  location_id: string | null;
+  family: Relation<{ code: string; name: string }>;
+  status: Relation<{ code: string; name: string }>;
+  location: Relation<{ name: string }>;
+};
+
+function first(value: string | string[] | undefined) { return Array.isArray(value) ? value[0] ?? "" : value ?? ""; }
+function relationOne<T>(value: Relation<T>): T | null { return Array.isArray(value) ? value[0] ?? null : value; }
+
+export const dynamic = "force-dynamic";
+
+export default async function PrintableInventoryReport({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  const params = await searchParams;
+  const familyCode = first(params.familia);
+  const statusCode = first(params.estado);
+  const locationId = first(params.ubicacion);
+  const scope = first(params.scope) || "active";
+  const { supabase, profile } = await requireAdmin();
+
+  const [{ data: families }, { data: statuses }, { data: locations }] = await Promise.all([
+    supabase.from("asset_families").select("id,code,name").eq("active", true).order("name"),
+    supabase.from("asset_statuses").select("id,code,name,is_disposed").eq("active", true).order("name"),
+    supabase.from("locations").select("id,name").eq("active", true).order("name"),
+  ]);
+
+  const selectedFamily = families?.find((item) => item.code === familyCode);
+  const selectedStatus = statuses?.find((item) => item.code === statusCode);
+  const selectedLocation = locations?.find((item) => item.id === locationId);
+  const rows: ReportAsset[] = [];
+  const chunkSize = 1000;
+  let offset = 0;
+
+  while (true) {
+    let query = supabase
+      .from("assets")
+      .select("id,inventory_code,name,asset_type,brand,model,serial_number,quantity,area,is_disposed,family_id,status_id,location_id,family:asset_families(code,name),status:asset_statuses(code,name),location:locations(name)")
+      .order("family_id")
+      .order("inventory_code", { ascending: true, nullsFirst: false })
+      .range(offset, offset + chunkSize - 1);
+
+    if (scope === "active") query = query.eq("is_disposed", false);
+    else if (scope === "disposed") query = query.eq("is_disposed", true);
+    if (selectedFamily) query = query.eq("family_id", selectedFamily.id);
+    if (selectedStatus) query = query.eq("status_id", selectedStatus.id);
+    if (selectedLocation) query = query.eq("location_id", selectedLocation.id);
+
+    const { data, error } = await query;
+    if (error) throw new Error(`No fue posible generar el informe: ${error.message}`);
+    const chunk = (data ?? []) as unknown as ReportAsset[];
+    rows.push(...chunk);
+    if (chunk.length < chunkSize) break;
+    offset += chunkSize;
+  }
+
+  const exportParams = new URLSearchParams({ scope });
+  if (selectedFamily) exportParams.set("family", selectedFamily.code);
+  if (selectedStatus) exportParams.set("status", selectedStatus.code);
+  if (selectedLocation) exportParams.set("location", selectedLocation.id);
+
+  const generatedAt = new Intl.DateTimeFormat("es-CL", { dateStyle: "full", timeStyle: "short" }).format(new Date());
+  const scopeLabel = scope === "disposed" ? "Dados de baja" : scope === "all" ? "Todos" : "Activos vigentes";
+
+  return (
+    <AppShell>
+      <header className="topbar print-hide">
+        <div><h1>Informe de inventario</h1><p>Vista imprimible equivalente a los informes operativos del sistema Access.</p></div>
+        <div className="header-actions"><Link className="button button-ghost" href="/informes">Volver</Link><Link className="button button-secondary" href={`/api/export/assets?${exportParams}`}>Exportar CSV</Link><PrintButton /></div>
+      </header>
+
+      <section className="panel panel-flush report-controls print-hide">
+        <form className="filters" method="get">
+          <label className="field"><span>Familia</span><select defaultValue={familyCode} name="familia"><option value="">Todas</option>{families?.map((family) => <option key={family.id} value={family.code}>{family.name}</option>)}</select></label>
+          <label className="field"><span>Estado</span><select defaultValue={statusCode} name="estado"><option value="">Todos</option>{statuses?.map((status) => <option key={status.id} value={status.code}>{status.name}</option>)}</select></label>
+          <label className="field"><span>Ubicación</span><select defaultValue={locationId} name="ubicacion"><option value="">Todas</option>{locations?.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</select></label>
+          <label className="field"><span>Alcance</span><select defaultValue={scope} name="scope"><option value="active">Activos vigentes</option><option value="disposed">Dados de baja</option><option value="all">Todos</option></select></label>
+          <div className="filter-actions"><button className="button button-secondary" type="submit">Generar informe</button></div>
+        </form>
+      </section>
+
+      <section className="panel report-document">
+        <div className="report-document-header">
+          <div><strong>Colegio Providencia</strong><h2>Inventario tecnológico</h2><p>{selectedFamily?.name || "Todas las familias"} · {selectedStatus?.name || "Todos los estados"} · {selectedLocation?.name || "Todas las ubicaciones"} · {scopeLabel}</p></div>
+          <div className="report-meta"><span>Generado: {generatedAt}</span><span>Administrador: {profile.email}</span><span>Total: {rows.length}</span></div>
+        </div>
+
+        {rows.length === 0 ? <div className="empty-state">No existen registros para los filtros seleccionados.</div> : <div className="table-wrap"><table className="data-table report-table"><thead><tr><th>#</th><th>Código</th><th>Tipo / subfamilia</th><th>Activo</th><th>Familia</th><th>Marca / modelo</th><th>Serie</th><th>Ubicación</th><th>Estado</th><th>Cant.</th></tr></thead><tbody>{rows.map((asset, index) => { const family = relationOne(asset.family); const status = relationOne(asset.status); const location = relationOne(asset.location); return <tr key={asset.id}><td>{index + 1}</td><td>{asset.inventory_code || "—"}</td><td>{asset.asset_type || "—"}</td><td>{asset.name || "—"}</td><td>{family?.name || "—"}</td><td>{[asset.brand, asset.model].filter(Boolean).join(" · ") || "—"}</td><td>{asset.serial_number || "—"}</td><td>{location?.name || asset.area || "—"}</td><td>{asset.is_disposed ? "Dado de baja" : status?.name || "—"}</td><td>{asset.quantity}</td></tr>; })}</tbody></table></div>}
+      </section>
+    </AppShell>
+  );
+}
