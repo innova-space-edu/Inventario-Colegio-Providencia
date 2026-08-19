@@ -14,7 +14,9 @@ Reconstrucción web del inventario tecnológico originalmente implementado en Mi
 - El archivo Access original se conserva sin modificaciones.
 - Ningún dato histórico se elimina durante la importación.
 - Los registros importados conservan `legacy_source`, `legacy_id` y `legacy_data`.
+- La antigua columna `FAMILIA` de Access se conserva como `assets.asset_type`; no se confunde con las ocho familias tecnológicas modernas.
 - Los equipos dados de baja se conservan con historial.
+- La importación es repetible mediante identidad legado e historial de ejecuciones.
 
 ## Seguridad
 
@@ -24,7 +26,7 @@ Reconstrucción web del inventario tecnológico originalmente implementado en Mi
 - La autorización administrativa se valida contra `public.profiles`.
 - No se debe exponer una `service_role` o secret key en variables `NEXT_PUBLIC_*`.
 
-## Variables de entorno
+## Variables de entorno de la aplicación
 
 Crear `.env.local` a partir de `.env.example`:
 
@@ -37,13 +39,14 @@ En Vercel deben configurarse las mismas dos variables para Production, Preview y
 
 ## Base de datos
 
-La primera migración está en:
+Migraciones principales:
 
 ```text
-supabase/migrations/20260819154500_initial_inventory_schema.sql
+supabase/migrations/20260819180525_initial_inventory_schema.sql
+supabase/migrations/20260819182519_legacy_fidelity_and_idempotent_imports.sql
 ```
 
-Crea el núcleo de inventario, familias, estados, ubicaciones, bajas, historial, auditoría y tablas de conservación de datos legado. También habilita RLS y define permisos explícitos para `authenticated`.
+El esquema contiene inventario, ocho familias, estados, ubicaciones, bajas, historial, auditoría, conservación del legado y RLS.
 
 ## Primer administrador
 
@@ -65,13 +68,18 @@ npm install
 npm run dev
 ```
 
-## Próximas fases
+## Migración del archivo Access
 
-1. Aplicar y verificar la migración en Supabase.
-2. Crear el administrador.
-3. Configurar variables de entorno en Vercel.
-4. Verificar login y dashboard.
-5. Extraer todas las tablas y registros del `.accdb`.
-6. Ejecutar importación de prueba y reconciliar conteos.
-7. Implementar inventario general y formularios por familia.
-8. Implementar bajas, informes y auditoría completa.
+El repositorio incluye:
+
+- `scripts/export-access.ps1`: exporta todas las tablas de usuario del `.accdb` a JSON usando Microsoft ACE en Windows.
+- `scripts/import-access.mjs`: carga los JSON a Supabase con trazabilidad e idempotencia.
+- `docs/ACCESS_MIGRATION.md`: procedimiento completo y reglas de reconciliación.
+
+Ejemplo de importación después de exportar:
+
+```bash
+npm run access:import -- ./access-export
+```
+
+Las credenciales secretas utilizadas por el importador son exclusivamente de servidor y no deben guardarse en Git ni en variables `NEXT_PUBLIC_*`.

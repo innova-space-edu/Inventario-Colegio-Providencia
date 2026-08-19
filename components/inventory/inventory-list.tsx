@@ -3,201 +3,23 @@ import { requireAdmin } from "@/lib/auth/require-admin";
 import type { InventorySearchParams } from "@/lib/inventory/types";
 
 type Relation<T> = T | T[] | null;
-type AssetListRow = {
-  id: string;
-  inventory_code: string | null;
-  name: string | null;
-  brand: string | null;
-  model: string | null;
-  serial_number: string | null;
-  quantity: number;
-  is_disposed: boolean;
-  updated_at: string;
-  family: Relation<{ code: string; name: string }>;
-  status: Relation<{ code: string; name: string }>;
-  location: Relation<{ name: string }>;
-};
-
-type InventoryListProps = {
-  title: string;
-  description: string;
-  basePath: string;
-  searchParams: InventorySearchParams;
-  familyCode?: string;
-};
-
-function first(value: string | string[] | undefined) {
-  return Array.isArray(value) ? value[0] ?? "" : value ?? "";
-}
-
-function relationOne<T>(value: Relation<T>): T | null {
-  if (Array.isArray(value)) return value[0] ?? null;
-  return value;
-}
-
-function buildHref(basePath: string, params: InventorySearchParams, page: number) {
-  const query = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) {
-    const normalized = first(value);
-    if (normalized && key !== "page") query.set(key, normalized);
-  }
-  if (page > 1) query.set("page", String(page));
-  const suffix = query.toString();
-  return suffix ? `${basePath}?${suffix}` : basePath;
-}
+type AssetListRow = { id: string; inventory_code: string | null; name: string | null; asset_type: string | null; brand: string | null; model: string | null; serial_number: string | null; quantity: number; is_disposed: boolean; updated_at: string; family: Relation<{ code: string; name: string }>; status: Relation<{ code: string; name: string }>; location: Relation<{ name: string }> };
+type InventoryListProps = { title: string; description: string; basePath: string; searchParams: InventorySearchParams; familyCode?: string };
+function first(value: string | string[] | undefined) { return Array.isArray(value) ? value[0] ?? "" : value ?? ""; }
+function relationOne<T>(value: Relation<T>): T | null { return Array.isArray(value) ? value[0] ?? null : value; }
+function buildHref(basePath: string, params: InventorySearchParams, page: number) { const query = new URLSearchParams(); for (const [key, value] of Object.entries(params)) { const normalized = first(value); if (normalized && key !== "page") query.set(key, normalized); } if (page > 1) query.set("page", String(page)); const suffix = query.toString(); return suffix ? `${basePath}?${suffix}` : basePath; }
 
 export async function InventoryList({ title, description, basePath, searchParams, familyCode }: InventoryListProps) {
   const { supabase } = await requireAdmin();
-  const q = first(searchParams.q).trim();
-  const familyFilter = familyCode || first(searchParams.familia);
-  const statusFilter = first(searchParams.estado);
-  const locationFilter = first(searchParams.ubicacion);
-  const scope = first(searchParams.scope) || "active";
-  const requestedPage = Number(first(searchParams.page) || "1");
-  const page = Number.isFinite(requestedPage) && requestedPage > 0 ? Math.floor(requestedPage) : 1;
-  const pageSize = 25;
+  const q = first(searchParams.q).trim(); const familyFilter = familyCode || first(searchParams.familia); const statusFilter = first(searchParams.estado); const locationFilter = first(searchParams.ubicacion); const scope = first(searchParams.scope) || "active";
+  const requestedPage = Number(first(searchParams.page) || "1"); const page = Number.isFinite(requestedPage) && requestedPage > 0 ? Math.floor(requestedPage) : 1; const pageSize = 25;
+  const [{ data: familiesData }, { data: statusesData }, { data: locationsData }] = await Promise.all([supabase.from("asset_families").select("id,code,name").eq("active", true).order("name"), supabase.from("asset_statuses").select("id,code,name,is_disposed").eq("active", true).order("name"), supabase.from("locations").select("id,name,area").eq("active", true).order("name")]);
+  const families = familiesData ?? []; const statuses = statusesData ?? []; const locations = locationsData ?? []; const selectedFamily = families.find((family) => family.code === familyFilter); const selectedStatus = statuses.find((status) => status.code === statusFilter);
+  let query = supabase.from("assets").select("id,inventory_code,name,asset_type,brand,model,serial_number,quantity,is_disposed,updated_at,family:asset_families(code,name),status:asset_statuses(code,name),location:locations(name)", { count: "exact" }).order("updated_at", { ascending: false });
+  if (scope === "disposed") query = query.eq("is_disposed", true); else if (scope !== "all") query = query.eq("is_disposed", false);
+  if (selectedFamily) query = query.eq("family_id", selectedFamily.id); if (selectedStatus) query = query.eq("status_id", selectedStatus.id); if (locationFilter) query = query.eq("location_id", locationFilter);
+  const safeSearch = q.replace(/[,%()]/g, " ").replace(/\s+/g, " ").trim(); if (safeSearch) query = query.or(`inventory_code.ilike.%${safeSearch}%,name.ilike.%${safeSearch}%,asset_type.ilike.%${safeSearch}%,brand.ilike.%${safeSearch}%,model.ilike.%${safeSearch}%,serial_number.ilike.%${safeSearch}%`);
+  const from = (page - 1) * pageSize; const { data, count, error } = await query.range(from, from + pageSize - 1); const assets = (data ?? []) as unknown as AssetListRow[]; const total = count ?? 0; const totalPages = Math.max(1, Math.ceil(total / pageSize)); const createQuery = familyCode ? `?familia=${encodeURIComponent(familyCode)}` : "";
 
-  const [{ data: familiesData }, { data: statusesData }, { data: locationsData }] = await Promise.all([
-    supabase.from("asset_families").select("id,code,name").eq("active", true).order("name"),
-    supabase.from("asset_statuses").select("id,code,name,is_disposed").eq("active", true).order("name"),
-    supabase.from("locations").select("id,name,area").eq("active", true).order("name"),
-  ]);
-
-  const families = familiesData ?? [];
-  const statuses = statusesData ?? [];
-  const locations = locationsData ?? [];
-  const selectedFamily = families.find((family) => family.code === familyFilter);
-  const selectedStatus = statuses.find((status) => status.code === statusFilter);
-
-  let query = supabase
-    .from("assets")
-    .select(
-      "id,inventory_code,name,brand,model,serial_number,quantity,is_disposed,updated_at,family:asset_families(code,name),status:asset_statuses(code,name),location:locations(name)",
-      { count: "exact" },
-    )
-    .order("updated_at", { ascending: false });
-
-  if (scope === "disposed") query = query.eq("is_disposed", true);
-  else if (scope !== "all") query = query.eq("is_disposed", false);
-
-  if (selectedFamily) query = query.eq("family_id", selectedFamily.id);
-  if (selectedStatus) query = query.eq("status_id", selectedStatus.id);
-  if (locationFilter) query = query.eq("location_id", locationFilter);
-
-  const safeSearch = q.replace(/[,%()]/g, " ").replace(/\s+/g, " ").trim();
-  if (safeSearch) {
-    query = query.or(
-      `inventory_code.ilike.%${safeSearch}%,name.ilike.%${safeSearch}%,brand.ilike.%${safeSearch}%,model.ilike.%${safeSearch}%,serial_number.ilike.%${safeSearch}%`,
-    );
-  }
-
-  const from = (page - 1) * pageSize;
-  const to = from + pageSize - 1;
-  const { data, count, error } = await query.range(from, to);
-  const assets = (data ?? []) as unknown as AssetListRow[];
-  const total = count ?? 0;
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
-
-  const createQuery = familyCode ? `?familia=${encodeURIComponent(familyCode)}` : "";
-
-  return (
-    <>
-      <header className="topbar">
-        <div><h1>{title}</h1><p>{description}</p></div>
-        <Link className="button button-primary" href={`/inventario/nuevo${createQuery}`}>Nuevo activo</Link>
-      </header>
-
-      <section className="panel panel-flush">
-        <form className="filters" method="get">
-          <label className="field filter-search">
-            <span>Buscar</span>
-            <input defaultValue={q} name="q" placeholder="Código, nombre, marca, modelo o serie" />
-          </label>
-          {!familyCode ? (
-            <label className="field">
-              <span>Familia</span>
-              <select defaultValue={familyFilter} name="familia">
-                <option value="">Todas</option>
-                {families.map((family) => <option key={family.id} value={family.code}>{family.name}</option>)}
-              </select>
-            </label>
-          ) : null}
-          <label className="field">
-            <span>Estado</span>
-            <select defaultValue={statusFilter} name="estado">
-              <option value="">Todos</option>
-              {statuses.map((status) => <option key={status.id} value={status.code}>{status.name}</option>)}
-            </select>
-          </label>
-          <label className="field">
-            <span>Ubicación</span>
-            <select defaultValue={locationFilter} name="ubicacion">
-              <option value="">Todas</option>
-              {locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}
-            </select>
-          </label>
-          <label className="field">
-            <span>Visualización</span>
-            <select defaultValue={scope} name="scope">
-              <option value="active">Activos</option>
-              <option value="disposed">Dados de baja</option>
-              <option value="all">Todos</option>
-            </select>
-          </label>
-          <div className="filter-actions">
-            <button className="button button-secondary" type="submit">Aplicar filtros</button>
-            <Link className="button button-ghost" href={basePath}>Limpiar</Link>
-          </div>
-        </form>
-      </section>
-
-      <section className="panel">
-        <div className="panel-heading">
-          <div><h2>Registros</h2><p className="muted">{total} registro{total === 1 ? "" : "s"} encontrado{total === 1 ? "" : "s"}.</p></div>
-          <span className="badge">Página {Math.min(page, totalPages)} de {totalPages}</span>
-        </div>
-
-        {error ? <div className="error-box">No fue posible cargar el inventario.</div> : null}
-        {!error && assets.length === 0 ? (
-          <div className="empty-state">No hay activos que coincidan con los filtros seleccionados.</div>
-        ) : null}
-
-        {assets.length > 0 ? (
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead><tr><th>Código</th><th>Activo</th><th>Familia</th><th>Marca / modelo</th><th>Serie</th><th>Ubicación</th><th>Estado</th><th>Cant.</th><th /></tr></thead>
-              <tbody>
-                {assets.map((asset) => {
-                  const family = relationOne(asset.family);
-                  const status = relationOne(asset.status);
-                  const location = relationOne(asset.location);
-                  return (
-                    <tr key={asset.id}>
-                      <td><strong>{asset.inventory_code || "—"}</strong></td>
-                      <td>{asset.name || "Sin descripción"}</td>
-                      <td>{family?.name || "—"}</td>
-                      <td>{[asset.brand, asset.model].filter(Boolean).join(" · ") || "—"}</td>
-                      <td>{asset.serial_number || "—"}</td>
-                      <td>{location?.name || "—"}</td>
-                      <td><span className={`status-pill ${asset.is_disposed ? "status-danger" : ""}`}>{asset.is_disposed ? "Dado de baja" : status?.name || "Sin estado"}</span></td>
-                      <td>{asset.quantity}</td>
-                      <td><Link className="table-link" href={`/inventario/${asset.id}`}>Ver</Link></td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        ) : null}
-
-        {totalPages > 1 ? (
-          <nav className="pagination" aria-label="Paginación">
-            <Link aria-disabled={page <= 1} className={`button button-ghost ${page <= 1 ? "disabled" : ""}`} href={buildHref(basePath, searchParams, Math.max(1, page - 1))}>Anterior</Link>
-            <span>{page} / {totalPages}</span>
-            <Link aria-disabled={page >= totalPages} className={`button button-ghost ${page >= totalPages ? "disabled" : ""}`} href={buildHref(basePath, searchParams, Math.min(totalPages, page + 1))}>Siguiente</Link>
-          </nav>
-        ) : null}
-      </section>
-    </>
-  );
+  return <><header className="topbar"><div><h1>{title}</h1><p>{description}</p></div><Link className="button button-primary" href={`/inventario/nuevo${createQuery}`}>Nuevo activo</Link></header><section className="panel panel-flush"><form className="filters" method="get"><label className="field filter-search"><span>Buscar</span><input defaultValue={q} name="q" placeholder="Código, tipo, nombre, marca, modelo o serie" /></label>{!familyCode ? <label className="field"><span>Familia</span><select defaultValue={familyFilter} name="familia"><option value="">Todas</option>{families.map((family) => <option key={family.id} value={family.code}>{family.name}</option>)}</select></label> : null}<label className="field"><span>Estado</span><select defaultValue={statusFilter} name="estado"><option value="">Todos</option>{statuses.map((status) => <option key={status.id} value={status.code}>{status.name}</option>)}</select></label><label className="field"><span>Ubicación</span><select defaultValue={locationFilter} name="ubicacion"><option value="">Todas</option>{locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</select></label><label className="field"><span>Visualización</span><select defaultValue={scope} name="scope"><option value="active">Activos</option><option value="disposed">Dados de baja</option><option value="all">Todos</option></select></label><div className="filter-actions"><button className="button button-secondary" type="submit">Aplicar filtros</button><Link className="button button-ghost" href={basePath}>Limpiar</Link></div></form></section><section className="panel"><div className="panel-heading"><div><h2>Registros</h2><p className="muted">{total} registro{total === 1 ? "" : "s"} encontrado{total === 1 ? "" : "s"}.</p></div><span className="badge">Página {Math.min(page, totalPages)} de {totalPages}</span></div>{error ? <div className="error-box">No fue posible cargar el inventario.</div> : null}{!error && assets.length === 0 ? <div className="empty-state">No hay activos que coincidan con los filtros seleccionados.</div> : null}{assets.length > 0 ? <div className="table-wrap"><table className="data-table"><thead><tr><th>Código</th><th>Activo</th><th>Tipo / subfamilia</th><th>Familia</th><th>Marca / modelo</th><th>Serie</th><th>Ubicación</th><th>Estado</th><th>Cant.</th><th /></tr></thead><tbody>{assets.map((asset) => { const family = relationOne(asset.family); const status = relationOne(asset.status); const location = relationOne(asset.location); return <tr key={asset.id}><td><strong>{asset.inventory_code || "—"}</strong></td><td>{asset.name || "Sin descripción"}</td><td>{asset.asset_type || "—"}</td><td>{family?.name || "—"}</td><td>{[asset.brand, asset.model].filter(Boolean).join(" · ") || "—"}</td><td>{asset.serial_number || "—"}</td><td>{location?.name || "—"}</td><td><span className={`status-pill ${asset.is_disposed ? "status-danger" : ""}`}>{asset.is_disposed ? "Dado de baja" : status?.name || "Sin estado"}</span></td><td>{asset.quantity}</td><td><Link className="table-link" href={`/inventario/${asset.id}`}>Ver</Link></td></tr>; })}</tbody></table></div> : null}{totalPages > 1 ? <nav className="pagination" aria-label="Paginación"><Link aria-disabled={page <= 1} className={`button button-ghost ${page <= 1 ? "disabled" : ""}`} href={buildHref(basePath, searchParams, Math.max(1, page - 1))}>Anterior</Link><span>{page} / {totalPages}</span><Link aria-disabled={page >= totalPages} className={`button button-ghost ${page >= totalPages ? "disabled" : ""}`} href={buildHref(basePath, searchParams, Math.min(totalPages, page + 1))}>Siguiente</Link></nav> : null}</section></>;
 }
