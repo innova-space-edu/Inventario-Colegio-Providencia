@@ -1,0 +1,60 @@
+import Link from "next/link";
+import { AppShell } from "@/components/app-shell";
+import { requireAdmin } from "@/lib/auth/require-admin";
+import type { InventorySearchParams } from "@/lib/inventory/types";
+
+function first(value: string | string[] | undefined) { return Array.isArray(value) ? value[0] ?? "" : value ?? ""; }
+function formatDate(value: string) { return new Intl.DateTimeFormat("es-CL", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)); }
+function jsonPreview(value: unknown) { return value ? JSON.stringify(value, null, 2) : "Sin datos"; }
+
+export const dynamic = "force-dynamic";
+
+export default async function AuditPage({ searchParams }: { searchParams: Promise<InventorySearchParams> }) {
+  const params = await searchParams;
+  const action = first(params.action);
+  const table = first(params.tabla);
+  const q = first(params.q).trim();
+  const requestedPage = Number(first(params.page) || "1");
+  const page = Number.isFinite(requestedPage) && requestedPage > 0 ? Math.floor(requestedPage) : 1;
+  const pageSize = 50;
+  const { supabase } = await requireAdmin();
+
+  let query = supabase.from("audit_logs").select("id,actor_id,action,table_name,record_id,before_data,after_data,created_at", { count: "exact" }).order("created_at", { ascending: false });
+  if (action) query = query.eq("action", action);
+  if (table) query = query.eq("table_name", table);
+  if (q) query = query.ilike("record_id", `%${q.replace(/[%_,]/g, "")}%`);
+  const from = (page - 1) * pageSize;
+  const { data, count, error } = await query.range(from, from + pageSize - 1);
+  const total = count ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+  const buildHref = (nextPage: number) => {
+    const url = new URLSearchParams();
+    if (action) url.set("action", action);
+    if (table) url.set("tabla", table);
+    if (q) url.set("q", q);
+    if (nextPage > 1) url.set("page", String(nextPage));
+    return url.toString() ? `/auditoria?${url}` : "/auditoria";
+  };
+
+  return (
+    <AppShell>
+      <header className="topbar"><div><h1>Auditoría</h1><p>Registro inmutable de inserciones, actualizaciones y operaciones sensibles del inventario.</p></div><span className="badge">{total} eventos</span></header>
+      <section className="panel">
+        <form className="filters compact-filters" method="get">
+          <label className="field filter-search"><span>ID del registro</span><input defaultValue={q} name="q" placeholder="UUID o identificador" /></label>
+          <label className="field"><span>Acción</span><select defaultValue={action} name="action"><option value="">Todas</option><option value="INSERT">INSERT</option><option value="UPDATE">UPDATE</option><option value="DELETE">DELETE</option></select></label>
+          <label className="field"><span>Tabla</span><select defaultValue={table} name="tabla"><option value="">Todas</option><option value="assets">assets</option><option value="asset_disposals">asset_disposals</option></select></label>
+          <div className="filter-actions"><button className="button button-secondary" type="submit">Filtrar</button><Link className="button button-ghost" href="/auditoria">Limpiar</Link></div>
+        </form>
+      </section>
+      <section className="panel">
+        <div className="panel-heading"><div><h2>Eventos</h2><p className="muted">Página {page} de {totalPages}.</p></div></div>
+        {error ? <div className="error-box">No fue posible cargar la auditoría.</div> : null}
+        {!error && !data?.length ? <div className="empty-state">No hay eventos para los filtros seleccionados.</div> : null}
+        {data?.length ? <div className="audit-list">{data.map((event) => <article className="audit-card" key={event.id}><div className="audit-card-head"><div><strong>{event.action} · {event.table_name}</strong><span>{event.record_id || "Sin identificador"}</span></div><time>{formatDate(event.created_at)}</time></div><div className="audit-actions">{event.table_name === "assets" && event.record_id ? <Link className="table-link" href={`/inventario/${event.record_id}`}>Abrir activo</Link> : null}<details><summary>Ver datos</summary><div className="audit-json-grid"><div><span>Antes</span><pre>{jsonPreview(event.before_data)}</pre></div><div><span>Después</span><pre>{jsonPreview(event.after_data)}</pre></div></div></details></div></article>)}</div> : null}
+        {totalPages > 1 ? <nav className="pagination"><Link className={`button button-ghost ${page <= 1 ? "disabled" : ""}`} href={buildHref(Math.max(1, page - 1))}>Anterior</Link><span>{page} / {totalPages}</span><Link className={`button button-ghost ${page >= totalPages ? "disabled" : ""}`} href={buildHref(Math.min(totalPages, page + 1))}>Siguiente</Link></nav> : null}
+      </section>
+    </AppShell>
+  );
+}
