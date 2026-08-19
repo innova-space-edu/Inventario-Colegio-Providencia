@@ -42,44 +42,34 @@ export async function updateAsset(formData: FormData) {
 }
 
 export async function disposeAsset(formData: FormData) {
-  const { supabase, profile } = await requireAdmin(); const assetId = requiredText(formData, "asset_id"); const reason = text(formData, "reason"); const observations = text(formData, "disposal_observations"); const approvedBy = text(formData, "approved_by");
-  const [{ data: asset }, { data: disposedStatus }] = await Promise.all([supabase.from("assets").select("*").eq("id", assetId).single(), supabase.from("asset_statuses").select("id").eq("code", "disposed").single()]);
-  if (!asset || !disposedStatus) redirect(`/inventario/${assetId}?error=dispose`);
-  const { error: updateError } = await supabase.from("assets").update({ is_disposed: true, status_id: disposedStatus.id, updated_by: profile.id }).eq("id", assetId); if (updateError) redirect(`/inventario/${assetId}?error=dispose`);
-  const { error: disposalError } = await supabase.from("asset_disposals").insert({ asset_id: assetId, reason, observations, approved_by: approvedBy, created_by: profile.id }); if (disposalError) redirect(`/inventario/${assetId}?error=dispose_record`);
-  await supabase.from("asset_history").insert({ asset_id: assetId, event_type: "disposed", description: reason || "Activo dado de baja.", before_data: asset, after_data: { ...asset, is_disposed: true, status_id: disposedStatus.id }, actor_id: profile.id });
-  revalidatePath("/dashboard"); revalidatePath("/inventario"); revalidatePath("/bajas"); revalidatePath("/calidad"); revalidatePath(`/inventario/${assetId}`); redirect(`/inventario/${assetId}?disposed=1`);
+  const { supabase } = await requireAdmin();
+  const assetId = requiredText(formData, "asset_id");
+  const reason = requiredText(formData, "reason");
+  const { error } = await supabase.rpc("dispose_asset_atomic", {
+    p_asset_id: assetId,
+    p_reason: reason,
+    p_observations: text(formData, "disposal_observations"),
+    p_approved_by: text(formData, "approved_by"),
+  });
+  if (error) redirect(`/inventario/${assetId}?error=dispose`);
+
+  revalidatePath("/dashboard");
+  revalidatePath("/inventario");
+  revalidatePath("/bajas");
+  revalidatePath("/calidad");
+  revalidatePath(`/inventario/${assetId}`);
+  redirect(`/inventario/${assetId}?disposed=1`);
 }
 
 export async function reactivateAsset(formData: FormData) {
-  const { supabase, profile } = await requireAdmin();
+  const { supabase } = await requireAdmin();
   const assetId = requiredText(formData, "asset_id");
   const reason = requiredText(formData, "reactivation_reason");
-
-  const [{ data: asset }, { data: operationalStatus }] = await Promise.all([
-    supabase.from("assets").select("*").eq("id", assetId).single(),
-    supabase.from("asset_statuses").select("id").eq("code", "operational").single(),
-  ]);
-
-  if (!asset || !asset.is_disposed || !operationalStatus) redirect(`/inventario/${assetId}?error=reactivate`);
-
-  const after = { ...asset, is_disposed: false, status_id: operationalStatus.id, updated_by: profile.id };
-  const { error } = await supabase.from("assets").update({
-    is_disposed: false,
-    status_id: operationalStatus.id,
-    updated_by: profile.id,
-  }).eq("id", assetId);
-  if (error) redirect(`/inventario/${assetId}?error=reactivate`);
-
-  const { error: historyError } = await supabase.from("asset_history").insert({
-    asset_id: assetId,
-    event_type: "reactivated",
-    description: `Reactivado: ${reason}`,
-    before_data: asset,
-    after_data: after,
-    actor_id: profile.id,
+  const { error } = await supabase.rpc("reactivate_asset_atomic", {
+    p_asset_id: assetId,
+    p_reason: reason,
   });
-  if (historyError) redirect(`/inventario/${assetId}?error=reactivate_history`);
+  if (error) redirect(`/inventario/${assetId}?error=reactivate`);
 
   revalidatePath("/dashboard");
   revalidatePath("/inventario");
