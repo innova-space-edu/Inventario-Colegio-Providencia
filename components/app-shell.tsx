@@ -7,6 +7,7 @@ import { logout } from "@/app/login/actions";
 const modules = [
   ["Dashboard", "/dashboard"],
   ["Inventario general", "/inventario"],
+  ["Calidad de datos", "/calidad"],
   ["Computadores", "/computadores"],
   ["Impresoras", "/impresoras"],
   ["Proyectores", "/proyectores"],
@@ -25,17 +26,5 @@ const modules = [
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  return (
-    <div className="shell">
-      <aside className="sidebar">
-        <div className="sidebar-brand"><div className="brand-mark">CP</div><div><strong>Colegio Providencia</strong><span>Inventario TI</span></div></div>
-        <nav className="nav">{modules.map(([label, href]) => {
-          const active = href === "/dashboard" ? pathname === href : pathname === href || pathname.startsWith(`${href}/`);
-          return <Link className={active ? "active" : ""} href={href} key={href}>{label}</Link>;
-        })}</nav>
-        <div className="sidebar-footer"><form action={logout}><button className="logout-button" type="submit">Cerrar sesión</button></form></div>
-      </aside>
-      <main className="main">{children}</main>
-    </div>
-  );
+  return <div className="shell"><aside className="sidebar"><div className="sidebar-brand"><div className="brand-mark">CP</div><div><strong>Colegio Providencia</strong><span>Inventario TI</span></div></div><nav className="nav">{modules.map(([label, href]) => { const active = href === "/dashboard" ? pathname === href : pathname === href || pathname.startsWith(`${href}/`); return <Link className={active ? "active" : ""} href={href} key={href}>{label}</Link>; })}</nav><div className="sidebar-footer"><form action={logout}><button className="logout-button" type="submit">Cerrar sesión</button></form></div></aside><main className="main">{children}</main></div>;
 }

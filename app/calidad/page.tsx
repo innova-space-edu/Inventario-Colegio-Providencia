@@ -1,0 +1,146 @@
+import Link from "next/link";
+import { AppShell } from "@/components/app-shell";
+import { requireAdmin } from "@/lib/auth/require-admin";
+
+type Relation<T> = T | T[] | null;
+type QualityAsset = {
+  id: string;
+  inventory_code: string | null;
+  name: string | null;
+  asset_type: string | null;
+  serial_number: string | null;
+  status_id: string | null;
+  location_id: string | null;
+  area: string | null;
+  family: Relation<{ name: string }>;
+};
+type IssueCode = "missing_code" | "missing_description" | "missing_location" | "missing_status" | "duplicate_serial";
+type QualityIssue = { asset: QualityAsset; codes: IssueCode[]; labels: string[] };
+
+const issueOptions: Array<{ code: "all" | IssueCode; label: string }> = [
+  { code: "all", label: "Todos los problemas" },
+  { code: "missing_code", label: "Sin código de inventario" },
+  { code: "missing_description", label: "Sin descripción/tipo" },
+  { code: "missing_location", label: "Sin ubicación" },
+  { code: "missing_status", label: "Sin estado" },
+  { code: "duplicate_serial", label: "Serie duplicada" },
+];
+
+function first(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] ?? "" : value ?? "";
+}
+
+function relationOne<T>(value: Relation<T>): T | null {
+  return Array.isArray(value) ? value[0] ?? null : value;
+}
+
+function normalizedSerial(value: string | null) {
+  return value?.trim().toUpperCase() || "";
+}
+
+export const dynamic = "force-dynamic";
+
+export default async function DataQualityPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  const params = await searchParams;
+  const requestedIssue = first(params.problema);
+  const issueFilter = issueOptions.some((item) => item.code === requestedIssue) ? requestedIssue : "all";
+  const { supabase } = await requireAdmin();
+
+  const assets: QualityAsset[] = [];
+  const chunkSize = 1000;
+  let offset = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from("assets")
+      .select("id,inventory_code,name,asset_type,serial_number,status_id,location_id,area,family:asset_families(name)")
+      .eq("is_disposed", false)
+      .order("created_at", { ascending: true })
+      .range(offset, offset + chunkSize - 1);
+    if (error) throw new Error(`No fue posible analizar la calidad del inventario: ${error.message}`);
+    const chunk = (data ?? []) as unknown as QualityAsset[];
+    assets.push(...chunk);
+    if (chunk.length < chunkSize) break;
+    offset += chunkSize;
+  }
+
+  const serialOwners = new Map<string, string[]>();
+  for (const asset of assets) {
+    const serial = normalizedSerial(asset.serial_number);
+    if (!serial) continue;
+    const owners = serialOwners.get(serial) ?? [];
+    owners.push(asset.id);
+    serialOwners.set(serial, owners);
+  }
+  const duplicateSerials = new Set([...serialOwners.entries()].filter(([, ids]) => ids.length > 1).map(([serial]) => serial));
+
+  const issues: QualityIssue[] = assets.map((asset) => {
+    const codes: IssueCode[] = [];
+    const labels: string[] = [];
+    if (!asset.inventory_code?.trim()) { codes.push("missing_code"); labels.push("Sin código de inventario"); }
+    if (!asset.name?.trim() && !asset.asset_type?.trim()) { codes.push("missing_description"); labels.push("Sin nombre ni tipo/subfamilia"); }
+    if (!asset.location_id && !asset.area?.trim()) { codes.push("missing_location"); labels.push("Sin ubicación ni área"); }
+    if (!asset.status_id) { codes.push("missing_status"); labels.push("Sin estado"); }
+    const serial = normalizedSerial(asset.serial_number);
+    if (serial && duplicateSerials.has(serial)) { codes.push("duplicate_serial"); labels.push("Número de serie duplicado"); }
+    return { asset, codes, labels };
+  }).filter((item) => item.codes.length > 0);
+
+  const [{ count: legacyPending }, { count: legacyErrors }] = await Promise.all([
+    supabase.from("legacy_imports").select("id", { count: "exact", head: true }).eq("migration_status", "pending"),
+    supabase.from("legacy_imports").select("id", { count: "exact", head: true }).eq("migration_status", "error"),
+  ]);
+
+  const filteredIssues = issueFilter === "all" ? issues : issues.filter((item) => item.codes.includes(issueFilter as IssueCode));
+  const cleanAssets = assets.length - issues.length;
+  const score = assets.length === 0 ? 100 : Math.round((cleanAssets / assets.length) * 100);
+  const displayRows = filteredIssues.slice(0, 300);
+
+  const counts = new Map<IssueCode, number>();
+  for (const issue of issues) for (const code of issue.codes) counts.set(code, (counts.get(code) ?? 0) + 1);
+
+  return (
+    <AppShell>
+      <header className="topbar">
+        <div><h1>Calidad de datos</h1><p>Detecta inconsistencias antes de que afecten búsquedas, informes o la reconciliación con Microsoft Access.</p></div>
+        <span className="badge">Calidad {score}%</span>
+      </header>
+
+      <section className="stats">
+        <article className="stat-card"><span>Activos vigentes</span><strong>{assets.length}</strong></article>
+        <article className="stat-card"><span>Sin problemas críticos</span><strong>{cleanAssets}</strong></article>
+        <article className="stat-card"><span>Requieren revisión</span><strong>{issues.length}</strong></article>
+        <article className="stat-card"><span>Filas Access por resolver</span><strong>{(legacyPending ?? 0) + (legacyErrors ?? 0)}</strong></article>
+      </section>
+
+      <section className="panel">
+        <div className="panel-heading"><div><h2>Controles automáticos</h2><p className="muted">Un mismo activo puede aparecer en más de una categoría.</p></div><Link className="button button-ghost" href="/importaciones/revision">Reconciliar Access</Link></div>
+        <div className="rule-grid">
+          {issueOptions.filter((item): item is { code: IssueCode; label: string } => item.code !== "all").map((item) => (
+            <Link className="management-card" href={`/calidad?problema=${item.code}`} key={item.code}>
+              <strong>{item.label}</strong><span>{counts.get(item.code) ?? 0} registro(s)</span>
+            </Link>
+          ))}
+          <article><strong>Series duplicadas</strong><span>{duplicateSerials.size} valor(es) de serie repetidos entre activos vigentes.</span></article>
+        </div>
+      </section>
+
+      <section className="panel">
+        <form className="filters compact-filters" method="get">
+          <label className="field"><span>Problema</span><select defaultValue={issueFilter} name="problema">{issueOptions.map((item) => <option key={item.code} value={item.code}>{item.label}</option>)}</select></label>
+          <div className="filter-actions"><button className="button button-secondary" type="submit">Aplicar</button><Link className="button button-ghost" href="/calidad">Limpiar</Link></div>
+        </form>
+      </section>
+
+      <section className="panel">
+        <div className="panel-heading"><div><h2>Registros para corregir</h2><p className="muted">{filteredIssues.length} resultado(s). Se muestran hasta 300 por revisión.</p></div></div>
+        {!displayRows.length ? <div className="empty-state">No se detectaron problemas para este filtro.</div> : null}
+        {displayRows.length ? <div className="table-wrap"><table className="data-table"><thead><tr><th>Código</th><th>Activo</th><th>Familia</th><th>Serie</th><th>Problemas detectados</th><th /></tr></thead><tbody>
+          {displayRows.map(({ asset, labels }) => {
+            const family = relationOne(asset.family);
+            return <tr key={asset.id}><td><strong>{asset.inventory_code || "—"}</strong></td><td>{asset.name || asset.asset_type || "Sin descripción"}</td><td>{family?.name || "—"}</td><td>{asset.serial_number || "—"}</td><td>{labels.join(" · ")}</td><td><Link className="table-link" href={`/inventario/${asset.id}/editar`}>Corregir</Link></td></tr>;
+          })}
+        </tbody></table></div> : null}
+      </section>
+    </AppShell>
+  );
+}

@@ -24,7 +24,7 @@ export async function createAsset(formData: FormData) {
   if (error || !asset) redirect("/inventario/nuevo?error=save");
   await saveFamilyDetails(supabase, asset.id, family.code, formData);
   await supabase.from("asset_history").insert({ asset_id: asset.id, event_type: "created", description: "Activo creado desde la aplicación web.", after_data: payload, actor_id: profile.id });
-  revalidatePath("/dashboard"); revalidatePath("/inventario"); redirect(`/inventario/${asset.id}?created=1`);
+  revalidatePath("/dashboard"); revalidatePath("/inventario"); revalidatePath("/calidad"); redirect(`/inventario/${asset.id}?created=1`);
 }
 
 export async function updateAsset(formData: FormData) {
@@ -38,7 +38,7 @@ export async function updateAsset(formData: FormData) {
   const { error } = await supabase.from("assets").update(payload).eq("id", assetId); if (error) redirect(`/inventario/${assetId}/editar?error=save`);
   await saveFamilyDetails(supabase, assetId, family.code, formData);
   await supabase.from("asset_history").insert({ asset_id: assetId, event_type: "updated", description: "Activo actualizado desde la aplicación web.", before_data: before, after_data: { ...before, ...payload }, actor_id: profile.id });
-  revalidatePath("/dashboard"); revalidatePath("/inventario"); revalidatePath(`/inventario/${assetId}`); redirect(`/inventario/${assetId}?updated=1`);
+  revalidatePath("/dashboard"); revalidatePath("/inventario"); revalidatePath("/calidad"); revalidatePath(`/inventario/${assetId}`); redirect(`/inventario/${assetId}?updated=1`);
 }
 
 export async function disposeAsset(formData: FormData) {
@@ -48,5 +48,43 @@ export async function disposeAsset(formData: FormData) {
   const { error: updateError } = await supabase.from("assets").update({ is_disposed: true, status_id: disposedStatus.id, updated_by: profile.id }).eq("id", assetId); if (updateError) redirect(`/inventario/${assetId}?error=dispose`);
   const { error: disposalError } = await supabase.from("asset_disposals").insert({ asset_id: assetId, reason, observations, approved_by: approvedBy, created_by: profile.id }); if (disposalError) redirect(`/inventario/${assetId}?error=dispose_record`);
   await supabase.from("asset_history").insert({ asset_id: assetId, event_type: "disposed", description: reason || "Activo dado de baja.", before_data: asset, after_data: { ...asset, is_disposed: true, status_id: disposedStatus.id }, actor_id: profile.id });
-  revalidatePath("/dashboard"); revalidatePath("/inventario"); revalidatePath(`/inventario/${assetId}`); redirect(`/inventario/${assetId}?disposed=1`);
+  revalidatePath("/dashboard"); revalidatePath("/inventario"); revalidatePath("/bajas"); revalidatePath("/calidad"); revalidatePath(`/inventario/${assetId}`); redirect(`/inventario/${assetId}?disposed=1`);
+}
+
+export async function reactivateAsset(formData: FormData) {
+  const { supabase, profile } = await requireAdmin();
+  const assetId = requiredText(formData, "asset_id");
+  const reason = requiredText(formData, "reactivation_reason");
+
+  const [{ data: asset }, { data: operationalStatus }] = await Promise.all([
+    supabase.from("assets").select("*").eq("id", assetId).single(),
+    supabase.from("asset_statuses").select("id").eq("code", "operational").single(),
+  ]);
+
+  if (!asset || !asset.is_disposed || !operationalStatus) redirect(`/inventario/${assetId}?error=reactivate`);
+
+  const after = { ...asset, is_disposed: false, status_id: operationalStatus.id, updated_by: profile.id };
+  const { error } = await supabase.from("assets").update({
+    is_disposed: false,
+    status_id: operationalStatus.id,
+    updated_by: profile.id,
+  }).eq("id", assetId);
+  if (error) redirect(`/inventario/${assetId}?error=reactivate`);
+
+  const { error: historyError } = await supabase.from("asset_history").insert({
+    asset_id: assetId,
+    event_type: "reactivated",
+    description: `Reactivado: ${reason}`,
+    before_data: asset,
+    after_data: after,
+    actor_id: profile.id,
+  });
+  if (historyError) redirect(`/inventario/${assetId}?error=reactivate_history`);
+
+  revalidatePath("/dashboard");
+  revalidatePath("/inventario");
+  revalidatePath("/bajas");
+  revalidatePath("/calidad");
+  revalidatePath(`/inventario/${assetId}`);
+  redirect(`/inventario/${assetId}?reactivated=1`);
 }
