@@ -27,7 +27,7 @@ Reconstrucción web del inventario tecnológico originalmente implementado en Mi
 - El correo de `public.profiles` debe coincidir con el usuario real de `auth.users`.
 - Todas las tablas del inventario usan RLS.
 - La autorización administrativa se valida contra `public.profiles`.
-- Las bajas y reactivaciones se ejecutan dentro de transacciones PostgreSQL atómicas.
+- Alta, edición, baja y reactivación de activos se ejecutan mediante transacciones PostgreSQL atómicas.
 - No se debe exponer una `service_role` o secret key en variables `NEXT_PUBLIC_*`.
 
 ## Variables de entorno de la aplicación
@@ -49,6 +49,7 @@ supabase/migrations/20260819182519_legacy_fidelity_and_idempotent_imports.sql
 supabase/migrations/20260819183157_legacy_import_review_workflow.sql
 supabase/migrations/20260819183632_single_admin_identity_hardening.sql
 supabase/migrations/20260819184842_atomic_asset_state_transitions.sql
+supabase/migrations/20260819185236_atomic_asset_create_update.sql
 ```
 
 ## Primer administrador
