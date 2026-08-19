@@ -19,7 +19,7 @@ Reconstrucción web del inventario tecnológico originalmente implementado en Mi
 - La importación es repetible mediante identidad legado e historial de ejecuciones.
 - Las filas no transformadas permanecen visibles en el panel de reconciliación y solo pueden ignorarse con una nota administrativa.
 
-## Seguridad
+## Seguridad e integridad
 
 - No existe registro público dentro de la aplicación.
 - Las cuentas se crean exclusivamente desde Supabase Authentication.
@@ -27,6 +27,7 @@ Reconstrucción web del inventario tecnológico originalmente implementado en Mi
 - El correo de `public.profiles` debe coincidir con el usuario real de `auth.users`.
 - Todas las tablas del inventario usan RLS.
 - La autorización administrativa se valida contra `public.profiles`.
+- Las bajas y reactivaciones se ejecutan dentro de transacciones PostgreSQL atómicas.
 - No se debe exponer una `service_role` o secret key en variables `NEXT_PUBLIC_*`.
 
 ## Variables de entorno de la aplicación
@@ -47,6 +48,7 @@ supabase/migrations/20260819180525_initial_inventory_schema.sql
 supabase/migrations/20260819182519_legacy_fidelity_and_idempotent_imports.sql
 supabase/migrations/20260819183157_legacy_import_review_workflow.sql
 supabase/migrations/20260819183632_single_admin_identity_hardening.sql
+supabase/migrations/20260819184842_atomic_asset_state_transitions.sql
 ```
 
 ## Primer administrador
@@ -72,4 +74,4 @@ El repositorio incluye `scripts/export-access.ps1`, `scripts/import-access.mjs` 
 npm run access:import -- ./access-export
 ```
 
-El módulo `/importaciones/revision` permite revisar filas `pending`, `error`, `ignored` y `migrated`, consultar el payload original y documentar explícitamente las exclusiones. `/configuracion` muestra el estado público de la conexión y los controles activos sin exponer secretos.
+El módulo `/importaciones/revision` permite revisar filas `pending`, `error`, `ignored` y `migrated`, consultar el payload original y documentar explícitamente las exclusiones. `/configuracion` muestra el estado público de la conexión y los controles activos sin exponer secretos. `/calidad` detecta registros incompletos y números de serie duplicados antes de generar informes o cerrar la reconciliación.
