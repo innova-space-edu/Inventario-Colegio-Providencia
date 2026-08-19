@@ -7,6 +7,7 @@
 -- 3) Ejecuta este script desde SQL Editor.
 --
 -- Este script NO crea usuarios de Auth y NO almacena contraseñas.
+-- Si ya había otro administrador activo, lo desactiva antes de activar el nuevo.
 
 do $$
 declare
@@ -22,6 +23,15 @@ begin
   if v_user_id is null then
     raise exception 'No existe un usuario en Supabase Auth con el correo %', v_email;
   end if;
+
+  lock table public.profiles in share row exclusive mode;
+
+  update public.profiles
+     set active = false,
+         updated_at = now()
+   where role = 'admin'
+     and active = true
+     and id <> v_user_id;
 
   insert into public.profiles (id, email, role, active)
   values (v_user_id, v_email, 'admin', true)

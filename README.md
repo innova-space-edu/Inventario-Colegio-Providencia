@@ -23,6 +23,8 @@ Reconstrucción web del inventario tecnológico originalmente implementado en Mi
 
 - No existe registro público dentro de la aplicación.
 - Las cuentas se crean exclusivamente desde Supabase Authentication.
+- PostgreSQL permite como máximo un administrador activo.
+- El correo de `public.profiles` debe coincidir con el usuario real de `auth.users`.
 - Todas las tablas del inventario usan RLS.
 - La autorización administrativa se valida contra `public.profiles`.
 - No se debe exponer una `service_role` o secret key en variables `NEXT_PUBLIC_*`.
@@ -36,8 +38,6 @@ NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
 ```
 
-En Vercel deben configurarse las mismas dos variables para Production, Preview y Development según corresponda.
-
 ## Base de datos
 
 Migraciones principales:
@@ -46,20 +46,16 @@ Migraciones principales:
 supabase/migrations/20260819180525_initial_inventory_schema.sql
 supabase/migrations/20260819182519_legacy_fidelity_and_idempotent_imports.sql
 supabase/migrations/20260819183157_legacy_import_review_workflow.sql
+supabase/migrations/20260819183632_single_admin_identity_hardening.sql
 ```
 
 ## Primer administrador
 
 1. Crear el usuario manualmente en Supabase → Authentication → Users.
-2. Copiar el UUID del usuario.
-3. Ejecutar en Supabase SQL Editor:
+2. Editar `supabase/setup/01_link_admin_profile.sql` con el correo real.
+3. Ejecutar ese script en SQL Editor.
 
-```sql
-insert into public.profiles (id, email, role, active)
-values ('UUID_DEL_USUARIO', 'correo@ejemplo.cl', 'admin', true);
-```
-
-La aplicación no implementa `signUp`.
+El script verifica que el correo exista en Auth y, si se cambia de administrador, desactiva el perfil anterior antes de activar el nuevo. La aplicación no implementa `signUp`.
 
 ## Desarrollo
 
@@ -76,4 +72,4 @@ El repositorio incluye `scripts/export-access.ps1`, `scripts/import-access.mjs` 
 npm run access:import -- ./access-export
 ```
 
-El módulo `/importaciones/revision` permite revisar filas `pending`, `error`, `ignored` y `migrated`, consultar el payload original y documentar explícitamente las exclusiones.
+El módulo `/importaciones/revision` permite revisar filas `pending`, `error`, `ignored` y `migrated`, consultar el payload original y documentar explícitamente las exclusiones. `/configuracion` muestra el estado público de la conexión y los controles activos sin exponer secretos.

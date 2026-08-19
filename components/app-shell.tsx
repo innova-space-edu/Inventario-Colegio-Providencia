@@ -20,6 +20,7 @@ const modules = [
   ["Informes", "/informes"],
   ["Auditoría", "/auditoria"],
   ["Importación Access", "/importaciones"],
+  ["Configuración", "/configuracion"],
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
