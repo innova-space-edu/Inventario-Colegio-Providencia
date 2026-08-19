@@ -1,0 +1,372 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+
+const exportDirectory = path.resolve(process.argv[2] || "access-export");
+const supabaseUrl = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
+const secretKey = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+
+if (!supabaseUrl || !secretKey) {
+  console.error("Faltan SUPABASE_URL y SUPABASE_SECRET_KEY (o SUPABASE_SERVICE_ROLE_KEY). No uses una clave secreta en NEXT_PUBLIC_*.");
+  process.exit(1);
+}
+
+const apiBase = `${supabaseUrl}/rest/v1`;
+const baseHeaders = {
+  apikey: secretKey,
+  "Content-Type": "application/json",
+};
+if (secretKey.split(".").length === 3) {
+  baseHeaders.Authorization = `Bearer ${secretKey}`;
+}
+
+function canonical(value) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+}
+
+function clean(value) {
+  if (value === null || value === undefined) return null;
+  const normalized = String(value).trim();
+  return normalized === "" ? null : normalized;
+}
+
+function numberOrOne(value) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : 1;
+}
+
+function pick(row, ...aliases) {
+  const entries = Object.entries(row ?? {}).map(([key, value]) => [canonical(key), value]);
+  const wanted = aliases.map(canonical);
+  for (const alias of wanted) {
+    const exact = entries.find(([key]) => key === alias);
+    if (exact) return exact[1];
+  }
+  for (const alias of wanted.filter((item) => item.length >= 5)) {
+    const prefix = entries.find(([key]) => key.startsWith(alias) || alias.startsWith(key));
+    if (prefix) return prefix[1];
+  }
+  return null;
+}
+
+async function request(resource, { method = "GET", body, prefer } = {}) {
+  const response = await fetch(`${apiBase}/${resource}`, {
+    method,
+    headers: {
+      ...baseHeaders,
+      ...(prefer ? { Prefer: prefer } : {}),
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+
+  const text = await response.text();
+  let payload = null;
+  if (text) {
+    try { payload = JSON.parse(text); } catch { payload = text; }
+  }
+
+  if (!response.ok) {
+    const error = new Error(`Supabase ${response.status}: ${typeof payload === "string" ? payload : JSON.stringify(payload)}`);
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
+  }
+  return payload;
+}
+
+function queryString(params) {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== null && value !== undefined) search.set(key, String(value));
+  }
+  return search.toString();
+}
+
+async function select(table, params) {
+  return request(`${table}?${queryString(params)}`);
+}
+
+async function insert(table, body, { representation = true } = {}) {
+  return request(table, {
+    method: "POST",
+    body,
+    prefer: representation ? "return=representation" : "return=minimal",
+  });
+}
+
+async function patch(table, filters, body) {
+  return request(`${table}?${queryString(filters)}`, {
+    method: "PATCH",
+    body,
+    prefer: "return=minimal",
+  });
+}
+
+async function upsertByAssetId(table, body) {
+  return request(`${table}?on_conflict=asset_id`, {
+    method: "POST",
+    body,
+    prefer: "resolution=merge-duplicates,return=minimal",
+  });
+}
+
+const tableMap = {
+  COMPUTADORAS: { family: "computer", fallbackName: "Computador" },
+  AUDIO: { family: "audio", fallbackName: "Equipo de audio" },
+  MUEBLES: { family: "furniture", fallbackName: "Mueble" },
+  IMPRESORAS: { family: "printer", fallbackName: "Impresora" },
+  PROYECTORES: { family: "projector", fallbackName: "Proyector" },
+  VARIOS: { family: "misc", fallbackName: "Varios" },
+  ACCESORIOS: { family: "accessory", fallbackName: "Accesorio" },
+  TELEVISORES: { family: "television", fallbackName: "Televisor" },
+};
+
+const manifest = JSON.parse(await fs.readFile(path.join(exportDirectory, "manifest.json"), "utf8"));
+const [families, statuses, existingLocations] = await Promise.all([
+  select("asset_families", { select: "id,code,name" }),
+  select("asset_statuses", { select: "id,code,name,is_disposed" }),
+  select("locations", { select: "id,name,legacy_value" }),
+]);
+
+const familyByCode = new Map(families.map((item) => [item.code, item]));
+const operationalStatus = statuses.find((item) => item.code === "operational") || statuses.find((item) => item.code === "active") || statuses.find((item) => !item.is_disposed);
+const locationsByName = new Map(existingLocations.map((item) => [canonical(item.name), item]));
+
+async function ensureLocation(rawLocation) {
+  const name = clean(rawLocation);
+  if (!name) return null;
+  const key = canonical(name);
+  const existing = locationsByName.get(key);
+  if (existing) return existing.id;
+
+  try {
+    const created = await insert("locations", [{ name, legacy_value: name, active: true }]);
+    const row = created[0];
+    locationsByName.set(key, row);
+    return row.id;
+  } catch (error) {
+    if (error.status !== 409) throw error;
+    const rows = await select("locations", { select: "id,name,legacy_value", name: `eq.${name}`, limit: 1 });
+    if (!rows[0]) throw error;
+    locationsByName.set(key, rows[0]);
+    return rows[0].id;
+  }
+}
+
+function sourceIdentity(row, index) {
+  const id = pick(row, "ID", "Id");
+  return clean(id) || `row-${index + 1}`;
+}
+
+async function findLegacyStage(table, sourceId) {
+  const rows = await select("legacy_imports", {
+    select: "id,migration_status,migrated_asset_id",
+    source_table: `eq.${table}`,
+    source_id: `eq.${sourceId}`,
+    limit: 1,
+  });
+  return rows[0] || null;
+}
+
+async function ensureLegacyStage(table, sourceId, row) {
+  const existing = await findLegacyStage(table, sourceId);
+  if (existing) return existing;
+  const created = await insert("legacy_imports", [{
+    source_table: table,
+    source_id: sourceId,
+    payload: row,
+    migration_status: "pending",
+  }]);
+  return created[0];
+}
+
+async function findExistingAsset(table, sourceId) {
+  const rows = await select("assets", {
+    select: "id",
+    legacy_source: `eq.${table}`,
+    legacy_id: `eq.${sourceId}`,
+    limit: 1,
+  });
+  return rows[0] || null;
+}
+
+function buildAsset(row, sourceTable, sourceId, familyConfig, familyId, locationId) {
+  const accessFamily = clean(pick(row, "FAMILIA"));
+  const article = clean(pick(row, "ARTICULO"));
+  const explicitName = clean(pick(row, "NOMBRE"));
+  const inventoryCode = clean(pick(row, "CODIGO", "INVENTARIO"));
+
+  let name = explicitName || accessFamily || familyConfig.fallbackName;
+  let assetType = accessFamily;
+  if (familyConfig.family === "accessory") {
+    name = article || name;
+    assetType = article || assetType;
+  } else if (familyConfig.family === "misc") {
+    name = explicitName || article || name;
+    assetType = article || assetType;
+  } else if (familyConfig.family === "television") {
+    assetType = accessFamily || "TELEVISOR";
+  }
+
+  return {
+    inventory_code: inventoryCode,
+    family_id: familyId,
+    status_id: operationalStatus?.id || null,
+    location_id: locationId,
+    name,
+    asset_type: assetType,
+    brand: clean(pick(row, "MARCA")),
+    model: clean(pick(row, "MODELO")),
+    serial_number: clean(pick(row, "SERIE")),
+    quantity: numberOrOne(pick(row, "CANTIDAD")),
+    area: clean(pick(row, "AREA")),
+    observations: clean(pick(row, "OBSERVACIONES")),
+    is_disposed: false,
+    legacy_source: sourceTable,
+    legacy_id: sourceId,
+    legacy_data: row,
+  };
+}
+
+async function insertAssetResilient(payload) {
+  try {
+    const created = await insert("assets", [payload]);
+    return created[0];
+  } catch (error) {
+    if (error.status === 409 && payload.inventory_code) {
+      console.warn(`  Código duplicado ${payload.inventory_code}; se conserva en legacy_data y el nuevo registro se importa sin inventory_code.`);
+      const created = await insert("assets", [{ ...payload, inventory_code: null }]);
+      return created[0];
+    }
+    throw error;
+  }
+}
+
+async function saveSpecializedDetails(assetId, familyCode, row) {
+  if (familyCode === "computer") {
+    await upsertByAssetId("computer_details", [{
+      asset_id: assetId,
+      memory: clean(pick(row, "MEMORIA")),
+      storage: clean(pick(row, "DISCO")),
+      screen: clean(pick(row, "PANTALLA")),
+      keyboard: clean(pick(row, "TECLADO")),
+      battery: clean(pick(row, "BATERIA")),
+      charger: clean(pick(row, "CARGADOR")),
+      legacy_data: row,
+    }]);
+  }
+
+  if (familyCode === "projector") {
+    await upsertByAssetId("projector_details", [{
+      asset_id: assetId,
+      lumens: clean(pick(row, "LUMENES")),
+      hdmi: clean(pick(row, "HDMI")),
+      vga: clean(pick(row, "VGA")),
+      legacy_data: row,
+    }]);
+  }
+
+  if (familyCode === "television") {
+    await upsertByAssetId("television_details", [{
+      asset_id: assetId,
+      size: clean(pick(row, "TAMANO", "TAMAÑO", "TAMA")),
+      legacy_data: row,
+    }]);
+  }
+}
+
+const runRows = await insert("migration_runs", [{
+  source_file: manifest.source_file || "Access export",
+  source_sha256: manifest.source_sha256 || null,
+  status: "running",
+  notes: "Importación automatizada desde exportación JSON del archivo Access.",
+}]);
+const runId = runRows[0].id;
+
+let sourceRows = 0;
+let importedRows = 0;
+let rejectedRows = 0;
+let pendingReviewRows = 0;
+
+try {
+  for (const tableEntry of manifest.tables || []) {
+    if (!tableEntry.file || tableEntry.error) continue;
+    const sourceTable = String(tableEntry.name || "").trim();
+    const rows = JSON.parse(await fs.readFile(path.join(exportDirectory, tableEntry.file), "utf8"));
+    const tableKey = canonical(sourceTable);
+    const mapping = tableMap[tableKey];
+    console.log(`\n${sourceTable}: ${rows.length} filas`);
+
+    for (let index = 0; index < rows.length; index++) {
+      const row = rows[index];
+      sourceRows++;
+      const sourceId = sourceIdentity(row, index);
+      const stage = await ensureLegacyStage(sourceTable, sourceId, row);
+
+      if (!mapping) {
+        pendingReviewRows++;
+        continue;
+      }
+
+      try {
+        const existing = await findExistingAsset(sourceTable, sourceId);
+        if (existing) {
+          await patch("legacy_imports", { id: `eq.${stage.id}` }, { migration_status: "migrated", migrated_asset_id: existing.id, error_message: null });
+          continue;
+        }
+
+        const family = familyByCode.get(mapping.family);
+        if (!family) throw new Error(`No existe la familia Supabase ${mapping.family}`);
+        const locationId = await ensureLocation(pick(row, "UBICACION", "UBICACI"));
+        const payload = buildAsset(row, sourceTable, sourceId, mapping, family.id, locationId);
+        const asset = await insertAssetResilient(payload);
+        await saveSpecializedDetails(asset.id, mapping.family, row);
+        await insert("asset_history", [{
+          asset_id: asset.id,
+          event_type: "legacy_import",
+          description: `Importado desde ${sourceTable} (${sourceId}).`,
+          after_data: payload,
+          actor_id: null,
+        }], { representation: false });
+        await patch("legacy_imports", { id: `eq.${stage.id}` }, { migration_status: "migrated", migrated_asset_id: asset.id, error_message: null });
+        importedRows++;
+      } catch (error) {
+        rejectedRows++;
+        const message = error instanceof Error ? error.message.slice(0, 2000) : String(error).slice(0, 2000);
+        await patch("legacy_imports", { id: `eq.${stage.id}` }, { migration_status: "error", error_message: message });
+        console.error(`  ERROR ${sourceTable}/${sourceId}: ${message}`);
+      }
+    }
+  }
+
+  await patch("migration_runs", { id: `eq.${runId}` }, {
+    status: rejectedRows > 0 ? "completed" : "completed",
+    finished_at: new Date().toISOString(),
+    source_rows: sourceRows,
+    imported_rows: importedRows,
+    rejected_rows: rejectedRows,
+    notes: `Importación terminada. ${pendingReviewRows} filas quedaron preservadas para revisión porque pertenecen a tablas sin mapeo automático.`,
+  });
+} catch (error) {
+  await patch("migration_runs", { id: `eq.${runId}` }, {
+    status: "failed",
+    finished_at: new Date().toISOString(),
+    source_rows: sourceRows,
+    imported_rows: importedRows,
+    rejected_rows: rejectedRows,
+    notes: error instanceof Error ? error.message.slice(0, 2000) : String(error).slice(0, 2000),
+  });
+  throw error;
+}
+
+console.log("\nResumen de importación");
+console.log(`Fuente: ${sourceRows}`);
+console.log(`Nuevos activos importados: ${importedRows}`);
+console.log(`Filas para revisión: ${pendingReviewRows}`);
+console.log(`Errores: ${rejectedRows}`);
+console.log(`Migration run: ${runId}`);
+
+if (rejectedRows > 0) process.exitCode = 2;

@@ -1,23 +1,8 @@
 export type InventorySearchParams = Record<string, string | string[] | undefined>;
 
-export type FamilyCatalog = {
-  id: string;
-  code: string;
-  name: string;
-};
-
-export type StatusCatalog = {
-  id: string;
-  code: string;
-  name: string;
-  is_disposed: boolean;
-};
-
-export type LocationCatalog = {
-  id: string;
-  name: string;
-  area: string | null;
-};
+export type FamilyCatalog = { id: string; code: string; name: string };
+export type StatusCatalog = { id: string; code: string; name: string; is_disposed: boolean };
+export type LocationCatalog = { id: string; name: string; area: string | null };
 
 export type AssetFormInitial = {
   id?: string;
@@ -26,6 +11,7 @@ export type AssetFormInitial = {
   status_id?: string | null;
   location_id?: string | null;
   name?: string | null;
+  asset_type?: string | null;
   brand?: string | null;
   model?: string | null;
   serial_number?: string | null;
