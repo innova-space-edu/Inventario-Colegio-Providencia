@@ -17,6 +17,7 @@ Reconstrucción web del inventario tecnológico originalmente implementado en Mi
 - La antigua columna `FAMILIA` de Access se conserva como `assets.asset_type`; no se confunde con las ocho familias tecnológicas modernas.
 - Los equipos dados de baja se conservan con historial.
 - La importación es repetible mediante identidad legado e historial de ejecuciones.
+- Las filas no transformadas permanecen visibles en el panel de reconciliación y solo pueden ignorarse con una nota administrativa.
 
 ## Seguridad
 
@@ -44,9 +45,8 @@ Migraciones principales:
 ```text
 supabase/migrations/20260819180525_initial_inventory_schema.sql
 supabase/migrations/20260819182519_legacy_fidelity_and_idempotent_imports.sql
+supabase/migrations/20260819183157_legacy_import_review_workflow.sql
 ```
-
-El esquema contiene inventario, ocho familias, estados, ubicaciones, bajas, historial, auditoría, conservación del legado y RLS.
 
 ## Primer administrador
 
@@ -70,16 +70,10 @@ npm run dev
 
 ## Migración del archivo Access
 
-El repositorio incluye:
-
-- `scripts/export-access.ps1`: exporta todas las tablas de usuario del `.accdb` a JSON usando Microsoft ACE en Windows.
-- `scripts/import-access.mjs`: carga los JSON a Supabase con trazabilidad e idempotencia.
-- `docs/ACCESS_MIGRATION.md`: procedimiento completo y reglas de reconciliación.
-
-Ejemplo de importación después de exportar:
+El repositorio incluye `scripts/export-access.ps1`, `scripts/import-access.mjs` y `docs/ACCESS_MIGRATION.md`. Después de exportar el `.accdb` en Windows:
 
 ```bash
 npm run access:import -- ./access-export
 ```
 
-Las credenciales secretas utilizadas por el importador son exclusivamente de servidor y no deben guardarse en Git ni en variables `NEXT_PUBLIC_*`.
+El módulo `/importaciones/revision` permite revisar filas `pending`, `error`, `ignored` y `migrated`, consultar el payload original y documentar explícitamente las exclusiones.
