@@ -2,29 +2,30 @@
   display: block;
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
   object-position: center;
+  background: #fff;
 }
 
 .shellLogo {
   width: 50px;
   height: 50px;
   flex: 0 0 50px;
-  padding: 0;
+  padding: 3px;
   border-radius: 14px;
   overflow: hidden;
-  background: transparent;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12);
+  background: #fff;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.16);
 }
 
 .loginLogo {
-  width: 88px;
-  height: 88px;
+  width: 96px;
+  height: 96px;
   margin-bottom: 18px;
-  padding: 0;
+  padding: 5px;
   border-radius: 20px;
   overflow: hidden;
-  background: transparent;
+  background: #fff;
   border: 1px solid #e6eaf0;
 }
 
