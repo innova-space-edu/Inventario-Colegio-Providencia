@@ -23,6 +23,19 @@ jobs:
           node-version: 22
       - name: Install dependencies
         run: npm install --no-audit --no-fund
+      - name: Check Access validator syntax
+        run: node --check scripts/validate-access-export.mjs
+      - name: Smoke test Access validator
+        run: |
+          mkdir -p /tmp/access-preflight
+          cat > /tmp/access-preflight/COMPUTADORAS.json <<'JSON'
+          [{"ID":1,"CODIGO":"CP-001","SERIE":"SERIE-001","FAMILIA":"NOTEBOOK"}]
+          JSON
+          cat > /tmp/access-preflight/manifest.json <<'JSON'
+          {"source_file":"fixture.accdb","source_sha256":"fixture","tables":[{"name":"COMPUTADORAS","file":"COMPUTADORAS.json","row_count":1,"error":null}]}
+          JSON
+          node scripts/validate-access-export.mjs /tmp/access-preflight --json > /tmp/access-preflight-report.json
+          node -e 'const r=require("/tmp/access-preflight-report.json"); if(r.errors.length || r.totals.parsed_rows !== 1) process.exit(1)'
       - name: Check Access importer syntax
         run: node --check scripts/import-access.mjs
       - name: Check Access exporter syntax
