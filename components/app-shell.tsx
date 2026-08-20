@@ -21,6 +21,8 @@ const modules = [
   ["Informes", "/informes"],
   ["Auditoría", "/auditoria"],
   ["Importación Access", "/importaciones"],
+  ["Usuarios", "/usuarios"],
+  ["Roles y permisos", "/roles"],
   ["Configuración", "/configuracion"],
 ];
 
