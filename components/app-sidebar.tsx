@@ -31,6 +31,7 @@ const modules: NavItem[] = [
   { label: "Usuarios", href: "/usuarios", rootOnly: true },
   { label: "Roles y permisos", href: "/roles", rootOnly: true },
   { label: "Configuración", href: "/configuracion", permission: "system.view" },
+  { label: "Mi cuenta", href: "/mi-cuenta" },
 ];
 
 export function AppSidebar({
