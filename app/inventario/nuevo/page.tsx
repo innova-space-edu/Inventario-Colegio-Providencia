@@ -14,9 +14,9 @@ export default async function NewAssetPage({ searchParams }: { searchParams: Pro
   const [{ data: familyData }, { data: statusData }, { data: locationData }] = await Promise.all([
     supabase.from("asset_families").select("id,code,name").eq("active", true).order("name"),
     supabase.from("asset_statuses").select("id,code,name,is_disposed").eq("active", true).order("name"),
-    supabase.from("locations").select("id,name,area").eq("active", true).order("name"),
+    supabase.from("locations").select("id,name,area,category,display_order,selectable").eq("active", true).eq("selectable", true).order("category").order("display_order").order("name"),
   ]);
   const families = (familyData ?? []) as FamilyCatalog[]; const statuses = (statusData ?? []) as StatusCatalog[]; const locations = (locationData ?? []) as LocationCatalog[];
   const defaultFamily = families.find((family) => family.code === familyCode) ?? families[0]; const defaultStatus = statuses.find((status) => status.code === "operational") ?? statuses.find((status) => !status.is_disposed);
-  return <AppShell><header className="topbar"><div><h1>Nuevo activo</h1><p>Registra un elemento nuevo manteniendo la estructura del inventario original.</p></div><Link className="button button-ghost" href="/inventario">Volver al inventario</Link></header><AssetForm action={createAsset} error={error} families={families} initial={{ family_id: defaultFamily?.id, status_id: defaultStatus?.id }} locations={locations} statuses={statuses} /></AppShell>;
+  return <AppShell><header className="topbar"><div><h1>Nuevo activo</h1><p>Registra un elemento nuevo usando las ubicaciones oficiales del colegio.</p></div><Link className="button button-ghost" href="/inventario">Volver al inventario</Link></header><AssetForm action={createAsset} error={error} families={families} initial={{ family_id: defaultFamily?.id, status_id: defaultStatus?.id }} locations={locations} statuses={statuses} /></AppShell>;
 }

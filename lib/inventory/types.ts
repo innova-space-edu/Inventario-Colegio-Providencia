@@ -2,7 +2,15 @@ export type InventorySearchParams = Record<string, string | string[] | undefined
 
 export type FamilyCatalog = { id: string; code: string; name: string };
 export type StatusCatalog = { id: string; code: string; name: string; is_disposed: boolean };
-export type LocationCatalog = { id: string; name: string; area: string | null };
+export type LocationCategory = "classroom" | "office" | "dependency" | "legacy";
+export type LocationCatalog = {
+  id: string;
+  name: string;
+  area: string | null;
+  category: LocationCategory;
+  display_order: number;
+  selectable: boolean;
+};
 
 export type AssetFormInitial = {
   id?: string;
@@ -17,6 +25,7 @@ export type AssetFormInitial = {
   serial_number?: string | null;
   quantity?: number;
   area?: string | null;
+  responsible_name?: string | null;
   observations?: string | null;
   memory?: string | null;
   storage?: string | null;
@@ -24,6 +33,11 @@ export type AssetFormInitial = {
   keyboard?: string | null;
   battery?: string | null;
   charger?: string | null;
+  screen_size?: string | null;
+  operating_system?: string | null;
+  resolution?: string | null;
+  touch_enabled?: boolean | null;
+  touch_points?: number | null;
   lumens?: string | null;
   hdmi?: string | null;
   vga?: string | null;
