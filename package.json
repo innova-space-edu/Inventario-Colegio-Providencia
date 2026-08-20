@@ -8,6 +8,7 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
+    "access:validate": "node scripts/validate-access-export.mjs",
     "access:import": "node scripts/import-access.mjs"
   },
   "dependencies": {
