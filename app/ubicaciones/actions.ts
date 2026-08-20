@@ -54,3 +54,21 @@ export async function updateLocation(formData: FormData) {
   if (error) redirect("/ubicaciones?error=update");
   revalidatePath("/ubicaciones"); revalidatePath(`/ubicaciones/${id}`); revalidatePath("/inventario"); redirect(`/ubicaciones?tipo=${category}&updated=1`);
 }
+
+export async function deleteLocation(formData: FormData) {
+  const { supabase } = await requirePermission("locations.manage");
+  const id = text(formData, "location_id");
+  if (!id) redirect("/ubicaciones?error=missing");
+
+  const { data: location } = await supabase.from("locations").select("category").eq("id", id).maybeSingle();
+  if (!location) redirect("/ubicaciones?error=not_found");
+
+  const { count, error: countError } = await supabase.from("assets").select("id", { count: "exact", head: true }).eq("location_id", id);
+  if (countError) redirect(`/ubicaciones?tipo=${location.category}&error=delete_check`);
+  if ((count ?? 0) > 0) redirect(`/ubicaciones?tipo=${location.category}&error=in_use`);
+
+  const { error } = await supabase.from("locations").delete().eq("id", id);
+  if (error) redirect(`/ubicaciones?tipo=${location.category}&error=delete`);
+
+  revalidatePath("/ubicaciones"); revalidatePath("/inventario"); redirect(`/ubicaciones?tipo=${location.category}&deleted=1`);
+}
