@@ -34,6 +34,10 @@ if (secretKey.split(".").length === 3) baseHeaders.Authorization = `Bearer ${sec
 function canonical(value) {
   return String(value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
+function exactKey(value) {
+  const normalized = clean(value);
+  return normalized ? normalized.toUpperCase() : null;
+}
 function clean(value) {
   if (value === null || value === undefined) return null;
   const normalized = String(value).trim();
@@ -42,6 +46,9 @@ function clean(value) {
 function numberOrOne(value) {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : 1;
+}
+function parseJsonText(text) {
+  return JSON.parse(String(text).replace(/^\uFEFF/, ""));
 }
 function pick(row, ...aliases) {
   const entries = Object.entries(row ?? {}).map(([key, value]) => [canonical(key), value]);
@@ -101,10 +108,44 @@ const tableMap = {
   ACCESORIOS: { family: "accessory", fallbackName: "Accesorio" },
   TELEVISORES: { family: "television", fallbackName: "Televisor" },
 };
+const disposalTables = new Set(["BAJADEEQUIPOS", "BAJA", "REGISTROBAJA"]);
 
-const manifest = JSON.parse(await fs.readFile(path.join(exportDirectory, "manifest.json"), "utf8"));
+const manifest = parseJsonText(await fs.readFile(path.join(exportDirectory, "manifest.json"), "utf8"));
 const existingLocations = await select("locations", { select: "id,name,legacy_value" });
 const locationsByName = new Map(existingLocations.map((item) => [canonical(item.name), item]));
+
+const existingAssets = await select("assets", {
+  select: "id,inventory_code,serial_number,legacy_source,legacy_id,is_disposed",
+});
+const assetById = new Map();
+const assetsByInventory = new Map();
+const assetsBySerial = new Map();
+
+function addToAssetIndex(map, key, assetId) {
+  if (!key || !assetId) return;
+  const values = map.get(key) ?? new Set();
+  values.add(assetId);
+  map.set(key, values);
+}
+function indexAsset(asset) {
+  if (!asset?.id) return;
+  assetById.set(asset.id, asset);
+  addToAssetIndex(assetsByInventory, exactKey(asset.inventory_code), asset.id);
+  addToAssetIndex(assetsBySerial, exactKey(asset.serial_number), asset.id);
+}
+for (const asset of existingAssets) indexAsset(asset);
+
+function findDisposalCandidates(row, sourceTable, sourceId) {
+  const ids = new Set();
+  const inventory = exactKey(pick(row, "N° INVENTARIO", "Nº INVENTARIO", "INVENTARIO", "CODIGO"));
+  const serial = exactKey(pick(row, "N° SERIE", "Nº SERIE", "SERIE"));
+  for (const id of assetsByInventory.get(inventory) ?? []) ids.add(id);
+  for (const id of assetsBySerial.get(serial) ?? []) ids.add(id);
+  return [...ids].filter((id) => {
+    const asset = assetById.get(id);
+    return !(asset?.legacy_source === sourceTable && String(asset?.legacy_id ?? "") === String(sourceId));
+  });
+}
 
 async function ensureLocation(rawLocation) {
   const name = clean(rawLocation);
@@ -193,6 +234,51 @@ function buildDetails(row, familyCode) {
   return {};
 }
 
+function parseDisposalDate(value) {
+  const raw = clean(value);
+  if (!raw) return null;
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString().slice(0, 10);
+}
+
+function buildHistoricalDisposal(row) {
+  const observations = clean(pick(row, "OBSERVACIONES"));
+  const brand = clean(pick(row, "MARCA"));
+  const model = clean(pick(row, "MODELO"));
+  const text = canonical(observations);
+  const hasComputerPart = ["COMPUTADOR", "DISCO", "LECTOR", "FUENTE"].some((field) => clean(pick(row, field)));
+
+  let familyCode = "misc";
+  let assetType = "EQUIPO DADO DE BAJA";
+  if (text.includes("MICROFONO")) {
+    familyCode = "audio";
+    assetType = text.includes("INALAMBR") ? "MICROFONO INALAMBRICO" : "MICROFONO";
+  } else if (text.includes("MONITOR") || canonical(brand) === "PCCHIPS" || hasComputerPart) {
+    familyCode = "computer";
+    assetType = text.includes("MONITOR") ? "MONITOR" : "EQUIPO / COMPONENTE COMPUTACIONAL";
+  }
+
+  return {
+    familyCode,
+    asset: {
+      inventory_code: clean(pick(row, "N° INVENTARIO", "Nº INVENTARIO", "INVENTARIO", "CODIGO")),
+      name: observations || [brand, model].filter(Boolean).join(" ") || "Equipo histórico dado de baja",
+      asset_type: assetType,
+      brand,
+      model,
+      serial_number: clean(pick(row, "N° SERIE", "Nº SERIE", "SERIE")),
+      quantity: 1,
+      area: null,
+      observations,
+    },
+    reason: "Registro histórico de baja migrado desde Microsoft Access",
+    observations,
+    approvedBy: null,
+    disposalDate: parseDisposalDate(pick(row, "REGISTRO BAJA", "FECHA BAJA", "FECHA")),
+  };
+}
+
 const runRows = await insert("migration_runs", [{
   source_file: manifest.source_file || "Access export",
   source_sha256: manifest.source_sha256 || null,
@@ -204,16 +290,29 @@ const runId = runRows[0].id;
 let sourceRows = 0;
 let importedRows = 0;
 let reconciledRows = 0;
+let historicalDisposalRows = 0;
+let manualDisposalRows = 0;
 let rejectedRows = 0;
 let pendingReviewRows = 0;
 let ignoredRows = 0;
 let generatedIdentityRows = 0;
 
+function tableRank(tableEntry) {
+  const key = canonical(tableEntry?.name);
+  if (tableMap[key]) return 0;
+  if (disposalTables.has(key)) return 1;
+  return 2;
+}
+
 try {
-  for (const tableEntry of manifest.tables || []) {
+  const orderedTables = [...(manifest.tables || [])].sort((a, b) => tableRank(a) - tableRank(b));
+
+  for (const tableEntry of orderedTables) {
     const sourceTable = String(tableEntry.name || "").trim();
-    const rows = JSON.parse(await fs.readFile(path.join(exportDirectory, tableEntry.file), "utf8"));
-    const mapping = tableMap[canonical(sourceTable)];
+    const tableKey = canonical(sourceTable);
+    const rows = parseJsonText(await fs.readFile(path.join(exportDirectory, tableEntry.file), "utf8"));
+    const mapping = tableMap[tableKey];
+    const isDisposalTable = disposalTables.has(tableKey);
     const resolveSourceIdentity = createSourceIdentityResolver();
     console.log(`\n${sourceTable}: ${rows.length} filas`);
 
@@ -228,6 +327,56 @@ try {
         ignoredRows++;
         continue;
       }
+
+      if (isDisposalTable) {
+        const historical = buildHistoricalDisposal(row);
+        try {
+          const ownMigratedAsset = stage.migration_status === "migrated" && stage.migrated_asset_id;
+          const candidateIds = ownMigratedAsset ? [] : findDisposalCandidates(row, sourceTable, sourceId);
+
+          if (candidateIds.length > 0) {
+            pendingReviewRows++;
+            manualDisposalRows++;
+            if (stage.migration_status === "error") {
+              await patch("legacy_imports", { id: `eq.${stage.id}` }, { migration_status: "pending", error_message: null });
+            }
+            console.warn(`  BAJA ${sourceTable}/${sourceId}: ${candidateIds.length} candidato(s) exacto(s); queda pendiente para /importaciones/bajas.`);
+            continue;
+          }
+
+          const result = await rpc("import_legacy_disposed_asset_atomic", {
+            p_stage_id: stage.id,
+            p_family_code: historical.familyCode,
+            p_asset: historical.asset,
+            p_reason: historical.reason,
+            p_observations: historical.observations,
+            p_approved_by: historical.approvedBy,
+            p_disposal_date: historical.disposalDate,
+          });
+
+          historicalDisposalRows++;
+          if (result?.asset_created === true) importedRows++;
+          else reconciledRows++;
+
+          if (result?.asset_id) {
+            indexAsset({
+              id: result.asset_id,
+              inventory_code: historical.asset.inventory_code,
+              serial_number: historical.asset.serial_number,
+              legacy_source: sourceTable,
+              legacy_id: sourceId,
+              is_disposed: true,
+            });
+          }
+        } catch (error) {
+          rejectedRows++;
+          const message = error instanceof Error ? error.message.slice(0, 2000) : String(error).slice(0, 2000);
+          await patch("legacy_imports", { id: `eq.${stage.id}` }, { migration_status: "error", error_message: message });
+          console.error(`  ERROR BAJA ${sourceTable}/${sourceId}: ${message}`);
+        }
+        continue;
+      }
+
       if (!mapping) {
         pendingReviewRows++;
         if (stage.migration_status === "error") {
@@ -238,15 +387,27 @@ try {
 
       try {
         const locationId = await ensureLocation(pick(row, "UBICACION", "UBICACI"));
+        const assetPayload = buildAsset(row, mapping);
         const result = await rpc("import_legacy_asset_atomic", {
           p_stage_id: stage.id,
           p_family_code: mapping.family,
           p_location_id: locationId,
-          p_asset: buildAsset(row, mapping),
+          p_asset: assetPayload,
           p_details: buildDetails(row, mapping.family),
         });
         if (result?.created === true) importedRows++;
         else reconciledRows++;
+
+        if (result?.asset_id) {
+          indexAsset({
+            id: result.asset_id,
+            inventory_code: assetPayload.inventory_code,
+            serial_number: assetPayload.serial_number,
+            legacy_source: sourceTable,
+            legacy_id: sourceId,
+            is_disposed: false,
+          });
+        }
       } catch (error) {
         rejectedRows++;
         const message = error instanceof Error ? error.message.slice(0, 2000) : String(error).slice(0, 2000);
@@ -258,14 +419,15 @@ try {
 
   const preservedRows = Number(await rpc("count_legacy_rows_for_run", { p_run_id: runId }));
   const preservationOk = preservedRows === sourceRows;
+  const fullyReconciled = preservationOk && rejectedRows === 0 && pendingReviewRows === 0;
 
   await patch("migration_runs", { id: `eq.${runId}` }, {
-    status: preservationOk && rejectedRows === 0 ? "completed" : "completed_with_review",
+    status: fullyReconciled ? "completed" : "completed_with_review",
     finished_at: new Date().toISOString(),
     source_rows: sourceRows,
     imported_rows: importedRows,
     rejected_rows: rejectedRows,
-    notes: `Importación terminada. preservadas=${preservedRows}/${sourceRows}; nuevos=${importedRows}; reconciliados=${reconciledRows}; pendientes=${pendingReviewRows}; ignorados=${ignoredRows}; errores=${rejectedRows}; identidades_hash=${generatedIdentityRows}.`,
+    notes: `Importación terminada. preservadas=${preservedRows}/${sourceRows}; nuevos=${importedRows}; reconciliados=${reconciledRows}; bajas_historicas=${historicalDisposalRows}; bajas_con_candidato=${manualDisposalRows}; pendientes=${pendingReviewRows}; ignorados=${ignoredRows}; errores=${rejectedRows}; identidades_hash=${generatedIdentityRows}.`,
   });
 
   if (!preservationOk) {
@@ -287,6 +449,8 @@ console.log("\nResumen de importación");
 console.log(`Fuente: ${sourceRows}`);
 console.log(`Nuevos activos importados: ${importedRows}`);
 console.log(`Activos reconciliados/reparados: ${reconciledRows}`);
+console.log(`Bajas históricas importadas/reconciliadas: ${historicalDisposalRows}`);
+console.log(`Bajas con candidato que requieren revisión manual: ${manualDisposalRows}`);
 console.log(`Filas para revisión: ${pendingReviewRows}`);
 console.log(`Filas ignoradas por decisión administrativa: ${ignoredRows}`);
 console.log(`Filas sin ID explícito con identidad estable por hash: ${generatedIdentityRows}`);

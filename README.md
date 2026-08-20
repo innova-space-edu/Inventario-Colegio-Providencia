@@ -1,6 +1,6 @@
 # Inventario Colegio Providencia
 
-Reconstrucción web del inventario tecnológico originalmente implementado en Microsoft Access (`Colegio Providencia(1).accdb`).
+Reconstrucción web del inventario tecnológico originalmente implementado en Microsoft Access (`Colegio Providencia.accdb`).
 
 ## Stack
 
@@ -12,11 +12,11 @@ Reconstrucción web del inventario tecnológico originalmente implementado en Mi
 ## Seguridad y acceso
 
 - `admin@colprovidencia.cl` es el administrador raíz protegido.
-- El administrador raíz usa el rol `super_admin` y conserva todos los permisos.
+- El administrador raíz usa `super_admin` y conserva todos los permisos.
 - Los demás usuarios usan RBAC mediante `app_roles`, `app_permissions`, `role_permissions` y `user_roles`.
-- Roles iniciales: `inventory_manager`, `inventory_operator` y `viewer`; además se pueden crear roles personalizados.
+- Se pueden asignar los mismos roles a múltiples usuarios y crear roles personalizados.
 - Todas las tablas del inventario usan RLS y las operaciones críticas validan permisos en PostgreSQL.
-- Alta, edición, baja y reactivación son transacciones atómicas.
+- Alta, edición, baja, reactivación e importación legado usan operaciones transaccionales.
 - No existe registro público en la aplicación.
 
 ## Variables de entorno
@@ -27,51 +27,47 @@ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
 SUPABASE_SECRET_KEY=
 ```
 
-`SUPABASE_SECRET_KEY` es **solo de servidor** y habilita el módulo `/usuarios` para invitar, crear, activar, desactivar y eliminar cuentas mediante Supabase Auth Admin API. Nunca debe usar el prefijo `NEXT_PUBLIC_`, nunca debe enviarse al navegador y nunca debe guardarse con un valor real en Git.
+`SUPABASE_SECRET_KEY` es **solo de servidor**. Habilita Auth Admin y la migración controlada; nunca debe usar `NEXT_PUBLIC_`, enviarse al navegador ni guardarse con un valor real en Git.
 
-La aplicación sigue usando la publishable key y RLS para las operaciones normales. La clave secreta se limita a las acciones administrativas de Auth ejecutadas en el servidor.
+## Inventario Access migrado
 
-## Principios de migración Access
+La fuente `Colegio Providencia.accdb` tiene SHA-256:
 
-- El archivo Access original se conserva sin modificaciones.
-- Ningún dato histórico se elimina durante la importación.
-- Los registros importados conservan `legacy_source`, `legacy_id` y `legacy_data`.
-- La columna `FAMILIA` de Access se conserva como `assets.asset_type`.
-- Los equipos dados de baja se conservan con historial.
-- La importación es repetible y cada fila no transformada permanece en reconciliación.
+```text
+4602f8ee7d9c78352a7f2dcb259db1bc7e019870d312193fb0dd3c1c4d6e8d05
+```
+
+La primera migración real preservó **235/235 filas**. El esquema soporta inventario vigente, bajas históricas, reconciliación manual cuando existe un candidato exacto, conservación íntegra de `legacy_data` e importaciones idempotentes.
 
 ## Migraciones principales
 
-```text
-supabase/migrations/20260819180525_initial_inventory_schema.sql
-supabase/migrations/20260819182519_legacy_fidelity_and_idempotent_imports.sql
-supabase/migrations/20260819183157_legacy_import_review_workflow.sql
-supabase/migrations/20260819183632_single_admin_identity_hardening.sql
-supabase/migrations/20260819184842_atomic_asset_state_transitions.sql
-supabase/migrations/20260819185236_atomic_asset_create_update.sql
-supabase/migrations/20260820012212_add_user_profile_role.sql
-supabase/migrations/20260820012308_role_based_access_control.sql
-supabase/migrations/20260820012453_protect_root_admin.sql
-```
+Las migraciones viven en `supabase/migrations/`. Entre las últimas capas se incluyen RBAC, auditoría administrativa, importación atómica, conservación de duplicados, reconciliación por ejecución y bajas históricas automáticas (`20260820062253_auto_import_historical_disposals.sql`).
 
 ## Administración desde la web
 
-- `/usuarios`: cuentas de Supabase Auth, activación/desactivación y asignación de rol.
-- `/roles`: creación de roles personalizados y matriz de permisos.
-- `/auditoria`: trazabilidad de cambios del inventario.
+- `/usuarios`: cuentas de Supabase Auth, activación/desactivación y roles.
+- `/roles`: roles personalizados y matriz de permisos.
+- `/inventario`: inventario general.
+- `/bajas`: activos retirados e históricos.
+- `/calidad`: controles de consistencia.
+- `/informes`: informes imprimibles/PDF y CSV.
+- `/auditoria`: trazabilidad técnica y administrativa.
+- `/importaciones`: estado de migración Access.
+- `/importaciones/bajas`: reconciliación manual únicamente cuando una baja histórica coincide con un activo ya existente.
 - `/configuracion`: estado del sistema.
 
 ## Desarrollo
 
 ```bash
-npm install
+npm ci
 npm run dev
 ```
 
 ## Migración del archivo Access
 
-El repositorio incluye `scripts/export-access.ps1`, `scripts/import-access.mjs` y `docs/ACCESS_MIGRATION.md`.
+El flujo completo está documentado en `docs/ACCESS_MIGRATION.md`.
 
 ```bash
+npm run access:validate -- ./access-export
 npm run access:import -- ./access-export
 ```
