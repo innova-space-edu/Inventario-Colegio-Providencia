@@ -31,13 +31,13 @@ export async function requireUser() {
 }
 
 export async function getPermissionCodes(supabase: ServerSupabase) {
-  const { data, error } = await supabase
-    .from("app_permissions")
-    .select("code")
-    .order("code");
-
+  const { data, error } = await supabase.rpc("get_my_permission_codes");
   if (error) return [] as string[];
-  return (data ?? []).map((item) => item.code as string);
+
+  const rows = (data ?? []) as Array<{ code?: string } | string>;
+  return rows
+    .map((item) => (typeof item === "string" ? item : item.code ?? ""))
+    .filter(Boolean);
 }
 
 // Compatibilidad con módulos existentes. La autorización fina se resuelve con RLS y permisos.
@@ -52,6 +52,21 @@ export async function requirePermission(permission: string) {
   });
 
   if (error || data !== true) redirect("/dashboard?error=forbidden");
+  return context;
+}
+
+export async function requirePermissions(permissions: string[]) {
+  const context = await requireUser();
+  const results = await Promise.all(
+    permissions.map((permission) =>
+      context.supabase.rpc("has_permission", { p_permission: permission }),
+    ),
+  );
+
+  if (results.some((result) => result.error || result.data !== true)) {
+    redirect("/dashboard?error=forbidden");
+  }
+
   return context;
 }
 
