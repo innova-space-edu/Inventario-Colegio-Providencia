@@ -23,9 +23,15 @@ function Invoke-Checked {
     [string]$Description
   )
 
+  # Windows PowerShell 5.1 does not create $LASTEXITCODE until a native
+  # executable has run. Initializing it avoids StrictMode failures and also
+  # prevents a stale exit code from a previous command being reused.
+  $global:LASTEXITCODE = 0
   & $Command
-  if ($LASTEXITCODE -ne 0) {
-    throw ("{0} termino con codigo {1}." -f $Description, $LASTEXITCODE)
+  $exitCode = $global:LASTEXITCODE
+
+  if ($exitCode -ne 0) {
+    throw ("{0} termino con codigo {1}." -f $Description, $exitCode)
   }
 }
 
@@ -73,17 +79,18 @@ else {
 
 Write-Host ""
 Write-Host "[2/4] Exportando Microsoft Access..." -ForegroundColor Cyan
-& "$PSScriptRoot\export-access.ps1" -DatabasePath $resolvedDatabase -OutputDirectory $resolvedOutput
 
-if ($LASTEXITCODE -ne 0) {
-  throw ("El exportador de Access termino con codigo {0}." -f $LASTEXITCODE)
-}
+# export-access.ps1 is another PowerShell script, not a native executable.
+# Its terminating errors propagate directly, so $LASTEXITCODE must not be
+# inspected here (it may legitimately be undefined in Windows PowerShell 5.1).
+& "$PSScriptRoot\export-access.ps1" -DatabasePath $resolvedDatabase -OutputDirectory $resolvedOutput
 
 Write-Host ""
 Write-Host "[3/4] Validando el export antes de tocar Supabase..." -ForegroundColor Cyan
 $reportPath = Join-Path $resolvedOutput "access-preflight-report.json"
+$global:LASTEXITCODE = 0
 $reportJson = & node "$PSScriptRoot\validate-access-export.mjs" $resolvedOutput --json
-$validatorExit = $LASTEXITCODE
+$validatorExit = $global:LASTEXITCODE
 $reportJson | Set-Content -Path $reportPath -Encoding UTF8
 
 if ($validatorExit -ne 0) {
