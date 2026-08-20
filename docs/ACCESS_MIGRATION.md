@@ -38,6 +38,7 @@ Nunca escribas la Secret Key dentro del script, Git, Vercel como `NEXT_PUBLIC_*`
 | VARIOS | FORVARIOS | Varios |
 | ACCESORIOS | FORACCESORIOS | Accesorios |
 | TELEVISORES | FORTELEVISORES | Televisores |
+| BAJA / BAJA DE EQUIPOS | flujo de baja | Reconciliación manual segura |
 
 Campos recuperados del diseño de Access:
 
@@ -96,21 +97,24 @@ La importación:
 6. importa **activo + detalle especializado + historial + estado de la fila legado dentro de una única transacción PostgreSQL**;
 7. usa `legacy_source + legacy_id` para que repetir el proceso no duplique activos;
 8. si una ejecución anterior dejó un activo parcial, una nueva ejecución vuelve a completar/reconciliar sus detalles;
-9. deja tablas no mapeadas en `pending` para revisión manual.
+9. conserva íntegramente los códigos de inventario repetidos y los marca en `/calidad` para revisión;
+10. deja tablas no mapeadas en `pending` para revisión manual;
+11. las filas de tablas `BAJA` se vinculan manualmente desde `/importaciones/bajas` para evitar dar de baja el activo equivocado.
 
-Si un `CODIGO` de Access ya está usado, el nuevo activo se conserva con `inventory_code = null`; el valor histórico continúa intacto en `legacy_data` y aparecerá en calidad/reconciliación.
+Los códigos repetidos **no se convierten en `null` ni se descartan**. El sistema conserva el valor original en `assets.inventory_code` y `legacy_data`; `/calidad` muestra la alerta para que el administrador decida si el duplicado es histórico válido o un dato a corregir.
 
 ## Reconciliación obligatoria
 
-Al terminar, revisar `/importaciones`, `/importaciones/revision` y `/calidad` y comparar:
+Al terminar, revisar `/importaciones`, `/importaciones/revision`, `/importaciones/bajas` y `/calidad` y comparar:
 
 - filas de fuente;
 - filas preservadas en `legacy_imports`;
 - activos nuevos;
 - activos reconciliados/reparados;
+- bajas históricas reconciliadas;
 - pendientes de revisión;
 - filas ignoradas con justificación;
 - errores;
-- duplicados y faltantes detectados por calidad de datos.
+- códigos y series duplicados detectados por calidad de datos.
 
 La migración no se considera cerrada mientras exista una diferencia no explicada entre el archivo fuente y los registros preservados en Supabase.
