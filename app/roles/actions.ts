@@ -61,19 +61,14 @@ export async function updateRolePermissions(formData: FormData) {
   if (!role || role.code === "super_admin") redirect("/roles?error=protected");
 
   const requested = [...new Set(formData.getAll("permissions").map((value) => String(value)))];
-  const { data: validPermissions } = await supabase.from("app_permissions").select("code").in("code", requested.length ? requested : ["__none__"]);
-  const valid = new Set((validPermissions ?? []).map((permission) => permission.code));
-  const permissions = requested.filter((permission) => valid.has(permission));
-
-  const { error: deleteError } = await supabase.from("role_permissions").delete().eq("role_id", roleId);
-  if (deleteError) redirect("/roles?error=permissions");
-
-  if (permissions.length) {
-    const { error: insertError } = await supabase.from("role_permissions").insert(permissions.map((permission_code) => ({ role_id: roleId, permission_code })));
-    if (insertError) redirect("/roles?error=permissions");
-  }
+  const { error } = await supabase.rpc("replace_role_permissions_atomic", {
+    p_role_id: roleId,
+    p_permissions: requested,
+  });
+  if (error) redirect("/roles?error=permissions");
 
   revalidatePath("/roles");
+  revalidatePath("/usuarios");
   redirect("/roles?permissions_updated=1");
 }
 
