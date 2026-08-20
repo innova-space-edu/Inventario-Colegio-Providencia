@@ -7,6 +7,12 @@ import { requirePermission } from "@/lib/auth/require-admin";
 function text(formData: FormData, key: string) { const value = String(formData.get(key) ?? "").trim(); return value || null; }
 function requiredText(formData: FormData, key: string) { const value = text(formData, key); if (!value) throw new Error(`Missing required field: ${key}`); return value; }
 function quantity(formData: FormData) { const value = Number(formData.get("quantity") ?? 1); return Number.isInteger(value) && value > 0 ? value : 1; }
+function safeReturnTo(formData: FormData) { const value = text(formData, "return_to"); return value && value.startsWith("/") && !value.startsWith("//") ? value : "/inventario"; }
+function redirectWithParams(path: string, params: Record<string, string | number>) {
+  const url = new URL(path, "http://inventario.local");
+  for (const [key, value] of Object.entries(params)) url.searchParams.set(key, String(value));
+  redirect(`${url.pathname}${url.search ? url.search : ""}`);
+}
 
 function commonPayload(formData: FormData) {
   return {
@@ -77,4 +83,46 @@ export async function reactivateAsset(formData: FormData) {
   const { error } = await supabase.rpc("reactivate_asset_atomic", { p_asset_id: assetId, p_reason: reason });
   if (error) redirect(`/inventario/${assetId}?error=reactivate`);
   revalidatePath("/dashboard"); revalidatePath("/inventario"); revalidatePath("/bajas"); revalidatePath("/calidad"); revalidatePath("/ubicaciones"); revalidatePath(`/inventario/${assetId}`); revalidatePath(`/qr/${assetId}`); redirect(`/inventario/${assetId}?reactivated=1`);
+}
+
+export async function bulkSetAssetLifecycle(formData: FormData) {
+  const returnTo = safeReturnTo(formData);
+  const action = text(formData, "bulk_action");
+  if (action !== "dispose" && action !== "reactivate") redirectWithParams(returnTo, { error: "bulk_action" });
+
+  const reason = text(formData, "bulk_reason");
+  if (!reason) redirectWithParams(returnTo, { error: "bulk_reason" });
+
+  const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  const assetIds = [...new Set(formData.getAll("asset_ids").map((value) => String(value)).filter((value) => uuidPattern.test(value)))].slice(0, 100);
+  if (!assetIds.length) redirectWithParams(returnTo, { error: "bulk_selection" });
+
+  const permission = action === "dispose" ? "inventory.dispose" : "inventory.reactivate";
+  const { supabase, profile } = await requirePermission(permission);
+  const { data, error } = await supabase.rpc("set_assets_lifecycle_bulk_atomic", {
+    p_asset_ids: assetIds,
+    p_action: action,
+    p_reason: reason,
+    p_observations: null,
+    p_approved_by: action === "dispose" ? profile.email : null,
+  });
+
+  if (error) redirectWithParams(returnTo, { error: "bulk_update" });
+
+  const result = (data ?? {}) as { changed?: number; skipped?: number; selected?: number };
+  revalidatePath("/dashboard");
+  revalidatePath("/inventario");
+  revalidatePath("/bajas");
+  revalidatePath("/calidad");
+  revalidatePath("/ubicaciones");
+  for (const assetId of assetIds) {
+    revalidatePath(`/inventario/${assetId}`);
+    revalidatePath(`/qr/${assetId}`);
+  }
+
+  redirectWithParams(returnTo, {
+    bulk: action === "dispose" ? "disposed" : "reactivated",
+    bulk_count: result.changed ?? 0,
+    bulk_skipped: result.skipped ?? 0,
+  });
 }
