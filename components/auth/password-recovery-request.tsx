@@ -39,7 +39,7 @@ export function PasswordRecoveryRequest() {
           <div className="brand-mark">CP</div>
           <h1>Revisa tu correo</h1>
           <p>Si la cuenta existe, recibirás un enlace para definir una nueva contraseña.</p>
-          <div className="success-box">Por seguridad no confirmamos si un correo está o no registrado.</div>
+          <div className="info-box">Por seguridad no confirmamos si un correo está o no registrado.</div>
           <p className="auth-note"><Link className="table-link" href="/login">Volver al inicio de sesión</Link></p>
         </section>
       </main>
