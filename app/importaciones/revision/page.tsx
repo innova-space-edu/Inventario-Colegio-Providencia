@@ -1,106 +1,18 @@
 import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { reviewLegacyImport } from "@/app/importaciones/revision/actions";
-import { requireAdmin } from "@/lib/auth/require-admin";
+import { requirePermission } from "@/lib/auth/require-admin";
 import type { InventorySearchParams } from "@/lib/inventory/types";
-
-function first(value: string | string[] | undefined) {
-  return Array.isArray(value) ? value[0] ?? "" : value ?? "";
-}
-
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat("es-CL", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
-}
-
-function payloadPreview(payload: unknown) {
-  return JSON.stringify(payload ?? {}, null, 2);
-}
-
+function first(value: string | string[] | undefined) { return Array.isArray(value) ? value[0] ?? "" : value ?? ""; }
+function formatDate(value: string) { return new Intl.DateTimeFormat("es-CL", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)); }
+function payloadPreview(payload: unknown) { return JSON.stringify(payload ?? {}, null, 2); }
 export const dynamic = "force-dynamic";
 
 export default async function LegacyReviewPage({ searchParams }: { searchParams: Promise<InventorySearchParams> }) {
-  const params = await searchParams;
-  const status = first(params.status) || "pending";
-  const source = first(params.source).trim();
-  const q = first(params.q).trim();
-  const errorCode = first(params.error);
-  const requestedPage = Number(first(params.page) || "1");
-  const page = Number.isFinite(requestedPage) && requestedPage > 0 ? Math.floor(requestedPage) : 1;
-  const pageSize = 30;
-  const { supabase } = await requireAdmin();
-
-  let query = supabase
-    .from("legacy_imports")
-    .select("id,source_table,source_id,payload,migrated_asset_id,migration_status,error_message,review_notes,reviewed_at,imported_at", { count: "exact" })
-    .order("imported_at", { ascending: false });
-
-  if (["pending", "error", "ignored", "migrated"].includes(status)) query = query.eq("migration_status", status);
-  if (source) query = query.ilike("source_table", `%${source.replace(/[%_,]/g, "")}%`);
-  if (q) query = query.ilike("source_id", `%${q.replace(/[%_,]/g, "")}%`);
-
-  const from = (page - 1) * pageSize;
-  const { data, count, error } = await query.range(from, from + pageSize - 1);
-  const total = count ?? 0;
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
-
-  const buildHref = (nextPage: number) => {
-    const search = new URLSearchParams();
-    if (status) search.set("status", status);
-    if (source) search.set("source", source);
-    if (q) search.set("q", q);
-    if (nextPage > 1) search.set("page", String(nextPage));
-    return `/importaciones/revision?${search}`;
-  };
-
-  return (
-    <AppShell>
-      <header className="topbar">
-        <div><h1>Reconciliación Access</h1><p>Revisión explícita de filas pendientes, rechazadas o excluidas durante la migración.</p></div>
-        <Link className="button button-ghost" href="/importaciones">Volver a importaciones</Link>
-      </header>
-
-      {errorCode ? <div className="error-box">No fue posible completar la revisión. Para ignorar una fila debes indicar una nota justificativa.</div> : null}
-
-      <section className="panel panel-flush">
-        <form className="filters compact-filters" method="get">
-          <label className="field"><span>Estado</span><select defaultValue={status} name="status"><option value="pending">Pendientes</option><option value="error">Con error</option><option value="ignored">Ignoradas</option><option value="migrated">Migradas</option></select></label>
-          <label className="field"><span>Tabla Access</span><input defaultValue={source} name="source" placeholder="Ej. BAJA DE EQUIPOS" /></label>
-          <label className="field filter-search"><span>ID legado</span><input defaultValue={q} name="q" placeholder="ID de la fila fuente" /></label>
-          <div className="filter-actions"><button className="button button-secondary" type="submit">Filtrar</button><Link className="button button-ghost" href="/importaciones/revision">Limpiar</Link></div>
-        </form>
-      </section>
-
-      <section className="panel">
-        <div className="panel-heading"><div><h2>Filas legado</h2><p className="muted">{total} fila{total === 1 ? "" : "s"} · página {page} de {totalPages}.</p></div><span className="badge">{status}</span></div>
-        {error ? <div className="error-box">No fue posible consultar las filas de migración.</div> : null}
-        {!error && !data?.length ? <div className="empty-state">No hay filas con estos filtros.</div> : null}
-
-        {data?.length ? <div className="audit-list">{data.map((row) => (
-          <article className="audit-card" key={row.id}>
-            <div className="audit-card-head">
-              <div><strong>{row.source_table} · {row.source_id || "Sin ID"}</strong><span>{row.migration_status} · importado {formatDate(row.imported_at)}</span></div>
-              {row.migrated_asset_id ? <Link className="table-link" href={`/inventario/${row.migrated_asset_id}`}>Abrir activo</Link> : null}
-            </div>
-
-            {row.error_message ? <div className="error-box">{row.error_message}</div> : null}
-            {row.review_notes ? <p className="muted"><strong>Revisión:</strong> {row.review_notes}{row.reviewed_at ? ` · ${formatDate(row.reviewed_at)}` : ""}</p> : null}
-
-            <details>
-              <summary>Ver payload original completo</summary>
-              <div className="audit-json-grid"><div><span>Fila Access preservada</span><pre>{payloadPreview(row.payload)}</pre></div></div>
-            </details>
-
-            {row.migration_status !== "migrated" ? (
-              <div className="legacy-review-actions">
-                {row.migration_status !== "pending" ? <form action={reviewLegacyImport}><input name="legacy_id" type="hidden" value={row.id} /><input name="next_status" type="hidden" value="pending" /><input name="review_notes" type="hidden" value="Reabierta para reintento o nueva revisión." /><button className="button button-secondary" type="submit">Reabrir como pendiente</button></form> : null}
-                {row.migration_status !== "ignored" ? <form action={reviewLegacyImport} className="legacy-ignore-form"><input name="legacy_id" type="hidden" value={row.id} /><input name="next_status" type="hidden" value="ignored" /><input name="review_notes" placeholder="Motivo obligatorio para ignorar esta fila" required /><button className="button button-ghost" type="submit">Marcar como ignorada</button></form> : null}
-              </div>
-            ) : null}
-          </article>
-        ))}</div> : null}
-
-        {totalPages > 1 ? <nav className="pagination"><Link className={`button button-ghost ${page <= 1 ? "disabled" : ""}`} href={buildHref(Math.max(1, page - 1))}>Anterior</Link><span>{page} / {totalPages}</span><Link className={`button button-ghost ${page >= totalPages ? "disabled" : ""}`} href={buildHref(Math.min(totalPages, page + 1))}>Siguiente</Link></nav> : null}
-      </section>
-    </AppShell>
-  );
+  const params = await searchParams; const status = first(params.status) || "pending"; const source = first(params.source).trim(); const q = first(params.q).trim(); const errorCode = first(params.error); const requestedPage = Number(first(params.page) || "1"); const page = Number.isFinite(requestedPage) && requestedPage > 0 ? Math.floor(requestedPage) : 1; const pageSize = 30;
+  const { supabase } = await requirePermission("imports.view"); const { data: canManage } = await supabase.rpc("has_permission", { p_permission: "imports.manage" });
+  let query = supabase.from("legacy_imports").select("id,source_table,source_id,payload,migrated_asset_id,migration_status,error_message,review_notes,reviewed_at,imported_at", { count: "exact" }).order("imported_at", { ascending: false }); if (["pending", "error", "ignored", "migrated"].includes(status)) query = query.eq("migration_status", status); if (source) query = query.ilike("source_table", `%${source.replace(/[%_,]/g, "")}%`); if (q) query = query.ilike("source_id", `%${q.replace(/[%_,]/g, "")}%`);
+  const from = (page - 1) * pageSize; const { data, count, error } = await query.range(from, from + pageSize - 1); const total = count ?? 0; const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const buildHref = (nextPage: number) => { const search = new URLSearchParams(); if (status) search.set("status", status); if (source) search.set("source", source); if (q) search.set("q", q); if (nextPage > 1) search.set("page", String(nextPage)); return `/importaciones/revision?${search}`; };
+  return <AppShell><header className="topbar"><div><h1>Reconciliación Access</h1><p>Revisión de filas pendientes, rechazadas o excluidas durante la migración.</p></div><Link className="button button-ghost" href="/importaciones">Volver a importaciones</Link></header>{errorCode ? <div className="error-box">No fue posible completar la revisión.</div> : null}<section className="panel panel-flush"><form className="filters compact-filters" method="get"><label className="field"><span>Estado</span><select defaultValue={status} name="status"><option value="pending">Pendientes</option><option value="error">Con error</option><option value="ignored">Ignoradas</option><option value="migrated">Migradas</option></select></label><label className="field"><span>Tabla Access</span><input defaultValue={source} name="source" placeholder="Ej. BAJA DE EQUIPOS" /></label><label className="field filter-search"><span>ID legado</span><input defaultValue={q} name="q" placeholder="ID de la fila fuente" /></label><div className="filter-actions"><button className="button button-secondary" type="submit">Filtrar</button><Link className="button button-ghost" href="/importaciones/revision">Limpiar</Link></div></form></section><section className="panel"><div className="panel-heading"><div><h2>Filas legado</h2><p className="muted">{total} fila{total === 1 ? "" : "s"} · página {page} de {totalPages}.</p></div><span className="badge">{canManage === true ? "Revisión habilitada" : "Solo lectura"}</span></div>{error ? <div className="error-box">No fue posible consultar las filas de migración.</div> : null}{!error && !data?.length ? <div className="empty-state">No hay filas con estos filtros.</div> : null}{data?.length ? <div className="audit-list">{data.map((row) => <article className="audit-card" key={row.id}><div className="audit-card-head"><div><strong>{row.source_table} · {row.source_id || "Sin ID"}</strong><span>{row.migration_status} · importado {formatDate(row.imported_at)}</span></div>{row.migrated_asset_id ? <Link className="table-link" href={`/inventario/${row.migrated_asset_id}`}>Abrir activo</Link> : null}</div>{row.error_message ? <div className="error-box">{row.error_message}</div> : null}{row.review_notes ? <p className="muted"><strong>Revisión:</strong> {row.review_notes}{row.reviewed_at ? ` · ${formatDate(row.reviewed_at)}` : ""}</p> : null}<details><summary>Ver payload original completo</summary><div className="audit-json-grid"><div><span>Fila Access preservada</span><pre>{payloadPreview(row.payload)}</pre></div></div></details>{canManage === true && row.migration_status !== "migrated" ? <div className="legacy-review-actions">{row.migration_status !== "pending" ? <form action={reviewLegacyImport}><input name="legacy_id" type="hidden" value={row.id} /><input name="next_status" type="hidden" value="pending" /><input name="review_notes" type="hidden" value="Reabierta para reintento o nueva revisión." /><button className="button button-secondary" type="submit">Reabrir como pendiente</button></form> : null}{row.migration_status !== "ignored" ? <form action={reviewLegacyImport} className="legacy-ignore-form"><input name="legacy_id" type="hidden" value={row.id} /><input name="next_status" type="hidden" value="ignored" /><input name="review_notes" placeholder="Motivo obligatorio para ignorar esta fila" required /><button className="button button-ghost" type="submit">Marcar como ignorada</button></form> : null}</div> : null}</article>)}</div> : null}{totalPages > 1 ? <nav className="pagination"><Link className={`button button-ghost ${page <= 1 ? "disabled" : ""}`} href={buildHref(Math.max(1, page - 1))}>Anterior</Link><span>{page} / {totalPages}</span><Link className={`button button-ghost ${page >= totalPages ? "disabled" : ""}`} href={buildHref(Math.min(totalPages, page + 1))}>Siguiente</Link></nav> : null}</section></AppShell>;
 }

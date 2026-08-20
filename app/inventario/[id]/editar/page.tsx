@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
 import { AssetForm } from "@/components/inventory/asset-form";
 import { updateAsset } from "@/app/inventario/actions";
-import { requireAdmin } from "@/lib/auth/require-admin";
+import { requirePermission } from "@/lib/auth/require-admin";
 import type { AssetFormInitial, FamilyCatalog, LocationCatalog, StatusCatalog } from "@/lib/inventory/types";
 
 type Relation<T> = T | T[] | null;
@@ -12,7 +12,7 @@ function first(value: string | string[] | undefined) { return Array.isArray(valu
 export const dynamic = "force-dynamic";
 
 export default async function EditAssetPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
-  const { id } = await params; const error = first((await searchParams).error); const { supabase } = await requireAdmin();
+  const { id } = await params; const error = first((await searchParams).error); const { supabase } = await requirePermission("inventory.edit");
   const [{ data: rawAsset }, { data: familyData }, { data: statusData }, { data: locationData }] = await Promise.all([supabase.from("assets").select("*,family:asset_families(code,name)").eq("id", id).maybeSingle(), supabase.from("asset_families").select("id,code,name").eq("active", true).order("name"), supabase.from("asset_statuses").select("id,code,name,is_disposed").eq("active", true).order("name"), supabase.from("locations").select("id,name,area").eq("active", true).order("name")]);
   if (!rawAsset) notFound();
   const asset = rawAsset as typeof rawAsset & { family: Relation<{ code: string; name: string }> }; const family = relationOne(asset.family); let details: Partial<AssetFormInitial> = {};
