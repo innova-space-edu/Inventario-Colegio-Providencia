@@ -11,7 +11,6 @@ type NavItem = {
   label: string;
   href: string;
   permission?: string;
-  rootOnly?: boolean;
 };
 
 const topModules: NavItem[] = [
@@ -37,8 +36,8 @@ const bottomModules: NavItem[] = [
   { label: "Informes", href: "/informes", permission: "reports.view" },
   { label: "Auditoría", href: "/auditoria", permission: "audit.view" },
   { label: "Importación Access", href: "/importaciones", permission: "imports.view" },
-  { label: "Usuarios", href: "/usuarios", rootOnly: true },
-  { label: "Roles y permisos", href: "/roles", rootOnly: true },
+  { label: "Usuarios", href: "/usuarios", permission: "users.view" },
+  { label: "Roles y permisos", href: "/roles", permission: "roles.view" },
   { label: "Configuración", href: "/configuracion", permission: "system.view" },
 ];
 
@@ -62,7 +61,6 @@ export function AppSidebar({
   const pathname = usePathname();
   const permissionSet = new Set(permissions);
   const canSee = (item: NavItem) => {
-    if (item.rootOnly) return isRoot;
     if (!item.permission) return true;
     return permissionSet.has(item.permission);
   };
@@ -72,6 +70,7 @@ export function AppSidebar({
   const visibleBottom = bottomModules.filter(canSee);
   const familyRouteActive = visibleFamilies.some((item) => isActive(pathname, item.href));
   const [familiesOpen, setFamiliesOpen] = useState(familyRouteActive);
+  const isAdministrator = permissionSet.has("users.manage") && permissionSet.has("roles.view");
 
   useEffect(() => {
     if (familyRouteActive) setFamiliesOpen(true);
@@ -125,7 +124,7 @@ export function AppSidebar({
         </form>
       </nav>
       <div className="sidebar-footer">
-        <div className="sidebar-user"><span>{isRoot ? "Administrador raíz" : "Usuario autorizado"}</span><strong>{email}</strong></div>
+        <div className="sidebar-user"><span>{isRoot ? "Superadministrador" : isAdministrator ? "Administrador" : "Usuario autorizado"}</span><strong>{email}</strong></div>
       </div>
     </aside>
   );
