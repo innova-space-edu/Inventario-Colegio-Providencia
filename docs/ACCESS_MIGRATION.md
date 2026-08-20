@@ -44,9 +44,38 @@ Se crea un JSON por tabla y `access-export/manifest.json` con SHA-256, conteos y
 
 Si Windows indica que no existe `Microsoft.ACE.OLEDB.16.0` ni `12.0`, se debe instalar Microsoft Access Database Engine de la misma arquitectura que PowerShell/Office.
 
-## Paso 2 — configurar credenciales solo para la migración
+## Paso 2 — validar el export antes de tocar Supabase
 
-Usar variables de entorno de servidor. **Nunca** copiar la clave secreta a Vercel como `NEXT_PUBLIC_*` ni incluirla en Git.
+La validación es local y **no necesita credenciales de Supabase**.
+
+```bash
+npm run access:validate -- ./access-export
+```
+
+El preflight comprueba:
+
+- que `manifest.json` sea válido;
+- que todos los JSON declarados existan y puedan leerse;
+- que el número de filas del manifest coincida con cada archivo;
+- identificadores fuente duplicados dentro de una tabla;
+- códigos de inventario repetidos entre las ocho tablas principales;
+- números de serie repetidos;
+- tablas no mapeadas que deberán pasar por reconciliación manual;
+- tablas principales esperadas que no aparezcan en el export.
+
+Los códigos y series repetidos son advertencias porque el sistema está diseñado para conservar el dato legado. Errores estructurales, como JSON inválido, archivo faltante o conteos inconsistentes, bloquean la importación.
+
+Para obtener el informe completo como JSON:
+
+```bash
+npm run access:validate -- ./access-export --json > access-preflight-report.json
+```
+
+No se debe ejecutar la carga si el validador termina con `RESULTADO: NO IMPORTAR todavía.`
+
+## Paso 3 — configurar credenciales solo para la migración
+
+Usar variables de entorno de servidor. **Nunca** copiar la clave secreta a código cliente, variables `NEXT_PUBLIC_*` ni incluirla en Git.
 
 PowerShell:
 
@@ -57,7 +86,7 @@ $env:SUPABASE_SECRET_KEY="sb_secret_..."
 
 También se admite una `SUPABASE_SERVICE_ROLE_KEY` heredada para una ejecución controlada.
 
-## Paso 3 — importar
+## Paso 4 — importar
 
 ```bash
 npm run access:import -- ./access-export
@@ -79,11 +108,13 @@ Si un `CODIGO` de Access está duplicado y choca con el código único moderno, 
 
 ## Reconciliación obligatoria
 
-Al terminar, revisar `/importaciones` y comparar:
+Al terminar, revisar `/importaciones`, `/importaciones/revision` y `/calidad` y comparar:
 
 - filas de fuente;
-- importadas;
+- filas preservadas en `legacy_imports`;
+- activos importados;
 - pendientes de revisión;
-- errores.
+- errores;
+- duplicados y faltantes detectados por calidad de datos.
 
 La migración no se considera cerrada mientras exista una diferencia no explicada entre el archivo fuente y los registros preservados en Supabase.
