@@ -26,7 +26,11 @@ export async function updateSession(request: NextRequest) {
   const { data } = await supabase.auth.getClaims();
   const isAuthenticated = Boolean(data?.claims?.sub);
   const path = request.nextUrl.pathname;
-  const isPublicRoute = path === "/login" || path.startsWith("/auth/");
+  const isPublicRoute =
+    path === "/login" ||
+    path === "/recuperar-clave" ||
+    path === "/cambiar-clave" ||
+    path.startsWith("/auth/");
 
   if (!isAuthenticated && !isPublicRoute) {
     const url = request.nextUrl.clone();
