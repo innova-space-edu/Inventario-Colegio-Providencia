@@ -53,6 +53,12 @@ Campos recuperados del diseño de Access:
 
 `FAMILIA` de Access se guarda en `assets.asset_type`. Las ocho familias tecnológicas principales se guardan separadamente en `asset_families`.
 
+## Identidad estable de cada fila
+
+Cuando una tabla Access trae un campo `ID`, ese valor se usa como identidad fuente. Algunas tablas históricas no tienen un ID visible; en ellas **no se usa el número de fila**, porque el orden de `SELECT *` puede cambiar entre exportaciones. El pipeline calcula un SHA-256 determinista del contenido completo de la fila y agrega un contador de ocurrencia para conservar incluso dos filas totalmente idénticas.
+
+Así, repetir la exportación o cambiar el orden de las filas no crea duplicados artificiales en `legacy_imports`. El preflight informa cuántas filas usan ID explícito y cuántas usan identidad estable por hash.
+
 ## Flujo manual equivalente
 
 ### 1. Exportar Access
@@ -71,7 +77,7 @@ Se crea un JSON por tabla y `access-export/manifest.json` con SHA-256, conteos y
 npm run access:validate -- ./access-export
 ```
 
-El preflight comprueba manifest, archivos JSON, conteos, identificadores fuente duplicados, códigos de inventario repetidos, números de serie repetidos, tablas sin mapeo y tablas principales ausentes. Los códigos y series repetidos son advertencias porque deben preservarse; errores estructurales bloquean la importación.
+El preflight comprueba manifest, archivos JSON, conteos, identidades fuente, códigos de inventario repetidos, números de serie repetidos, tablas sin mapeo y tablas principales ausentes. Cuando el archivo Access original sigue disponible en la misma ruta, también vuelve a calcular su SHA-256 para comprobar que no cambió después de la exportación. Los códigos y series repetidos son advertencias porque deben preservarse; errores estructurales bloquean la importación.
 
 Para guardar el informe completo:
 
@@ -92,14 +98,15 @@ La importación:
 1. ejecuta nuevamente el preflight;
 2. crea una ejecución en `migration_runs`;
 3. conserva cada fila en `legacy_imports` antes de transformarla;
-4. respeta filas marcadas administrativamente como `ignored`;
-5. crea o reutiliza ubicaciones;
-6. importa **activo + detalle especializado + historial + estado de la fila legado dentro de una única transacción PostgreSQL**;
-7. usa `legacy_source + legacy_id` para que repetir el proceso no duplique activos;
-8. si una ejecución anterior dejó un activo parcial, una nueva ejecución vuelve a completar/reconciliar sus detalles;
-9. conserva íntegramente los códigos de inventario repetidos y los marca en `/calidad` para revisión;
-10. deja tablas no mapeadas en `pending` para revisión manual;
-11. las filas de tablas `BAJA` se vinculan manualmente desde `/importaciones/bajas` para evitar dar de baja el activo equivocado.
+4. usa ID explícito o identidad estable por hash para evitar duplicados al repetir una exportación;
+5. respeta filas marcadas administrativamente como `ignored`;
+6. crea o reutiliza ubicaciones;
+7. importa **activo + detalle especializado + historial + estado de la fila legado dentro de una única transacción PostgreSQL**;
+8. usa `legacy_source + legacy_id` para que repetir el proceso no duplique activos;
+9. si una ejecución anterior dejó un activo parcial, una nueva ejecución vuelve a completar/reconciliar sus detalles;
+10. conserva íntegramente los códigos de inventario repetidos y los marca en `/calidad` para revisión;
+11. deja tablas no mapeadas en `pending` para revisión manual;
+12. las filas de tablas `BAJA` se vinculan manualmente desde `/importaciones/bajas` para evitar dar de baja el activo equivocado.
 
 Los códigos repetidos **no se convierten en `null` ni se descartan**. El sistema conserva el valor original en `assets.inventory_code` y `legacy_data`; `/calidad` muestra la alerta para que el administrador decida si el duplicado es histórico válido o un dato a corregir.
 
