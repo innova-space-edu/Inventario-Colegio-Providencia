@@ -1,5 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { createHash } from "node:crypto";
+import { createSourceIdentityResolver } from "./legacy-identity.mjs";
 
 const exportDirectory = path.resolve(process.argv[2] || "access-export");
 const jsonOutput = process.argv.includes("--json");
@@ -43,10 +45,6 @@ function pick(row, ...aliases) {
   return null;
 }
 
-function sourceIdentity(row, index) {
-  return clean(pick(row, "ID", "Id")) || `row-${index + 1}`;
-}
-
 function addOccurrence(map, key, occurrence) {
   if (!key) return;
   const normalized = String(key).trim().toUpperCase();
@@ -63,6 +61,11 @@ async function fileExists(filePath) {
   } catch {
     return false;
   }
+}
+
+async function sha256File(filePath) {
+  const bytes = await fs.readFile(filePath);
+  return createHash("sha256").update(bytes).digest("hex");
 }
 
 function duplicates(map) {
@@ -88,10 +91,19 @@ async function main() {
 
   const report = {
     source_file: manifest.source_file ?? null,
+    source_path: manifest.source_path ?? null,
     source_sha256: manifest.source_sha256 ?? null,
+    source_hash_verified: null,
     exported_at: manifest.exported_at ?? null,
     tables: [],
-    totals: { manifest_rows: 0, parsed_rows: 0, tables_ok: 0, tables_with_errors: 0 },
+    totals: {
+      manifest_rows: 0,
+      parsed_rows: 0,
+      tables_ok: 0,
+      tables_with_errors: 0,
+      explicit_source_ids: 0,
+      generated_source_ids: 0,
+    },
     warnings: [],
     errors: [],
     duplicate_inventory_codes: [],
@@ -99,6 +111,18 @@ async function main() {
     unmapped_tables: [],
     missing_expected_tables: [],
   };
+
+  if (manifest.source_path && manifest.source_sha256) {
+    if (await fileExists(manifest.source_path)) {
+      const currentHash = await sha256File(manifest.source_path);
+      report.source_hash_verified = currentHash.toLowerCase() === String(manifest.source_sha256).toLowerCase();
+      if (!report.source_hash_verified) {
+        report.errors.push("El SHA-256 del archivo Access cambió después de la exportación. Debes volver a exportar antes de importar.");
+      }
+    } else {
+      report.warnings.push("No fue posible reabrir source_path para verificar el SHA-256. Esto es normal si el export fue movido a otro equipo.");
+    }
+  }
 
   const inventoryCodes = new Map();
   const serialNumbers = new Map();
@@ -115,7 +139,10 @@ async function main() {
       file: fileName,
       declared_rows: Number.isFinite(declaredRows) ? declaredRows : null,
       parsed_rows: null,
+      explicit_source_ids: 0,
+      generated_source_ids: 0,
       duplicate_source_ids: [],
+      identical_row_groups: [],
       status: "ok",
       error: table?.error ?? null,
     };
@@ -178,7 +205,10 @@ async function main() {
       report.errors.push(`${tableName}: manifest declara ${declaredRows} filas pero el JSON contiene ${rows.length}.`);
     }
 
+    const resolveSourceIdentity = createSourceIdentityResolver();
     const sourceIds = new Map();
+    const fingerprints = new Map();
+
     for (let index = 0; index < rows.length; index++) {
       const row = rows[index];
       if (!row || typeof row !== "object" || Array.isArray(row)) {
@@ -187,8 +217,18 @@ async function main() {
         continue;
       }
 
-      const sourceId = sourceIdentity(row, index);
+      const identity = resolveSourceIdentity(row);
+      const sourceId = identity.sourceId;
       addOccurrence(sourceIds, sourceId, index + 1);
+
+      if (identity.strategy === "explicit_id") {
+        entry.explicit_source_ids++;
+        report.totals.explicit_source_ids++;
+      } else {
+        entry.generated_source_ids++;
+        report.totals.generated_source_ids++;
+        addOccurrence(fingerprints, identity.fingerprint, index + 1);
+      }
 
       if (EXPECTED_TABLES.has(tableKey)) {
         const inventoryCode = clean(pick(row, "CODIGO", "INVENTARIO"));
@@ -199,9 +239,17 @@ async function main() {
     }
 
     entry.duplicate_source_ids = duplicates(sourceIds);
+    entry.identical_row_groups = duplicates(fingerprints);
+
     if (entry.duplicate_source_ids.length) {
       entry.status = "error";
-      report.errors.push(`${tableName}: existen ${entry.duplicate_source_ids.length} identificadores fuente duplicados.`);
+      report.errors.push(`${tableName}: existen ${entry.duplicate_source_ids.length} identificadores ID explícitos duplicados.`);
+    }
+    if (entry.generated_source_ids > 0) {
+      report.warnings.push(`${tableName}: ${entry.generated_source_ids} fila(s) no tienen ID explícito; usarán una identidad estable derivada del contenido.`);
+    }
+    if (entry.identical_row_groups.length) {
+      report.warnings.push(`${tableName}: existen ${entry.identical_row_groups.length} grupo(s) de filas completamente idénticas. Se conservará cada ocurrencia por separado.`);
     }
 
     if (entry.status === "ok") report.totals.tables_ok++;
@@ -210,26 +258,16 @@ async function main() {
   }
 
   const duplicateManifestNames = duplicates(manifestNames);
-  if (duplicateManifestNames.length) {
-    report.errors.push(`El manifest contiene ${duplicateManifestNames.length} nombre(s) de tabla duplicado(s).`);
-  }
+  if (duplicateManifestNames.length) report.errors.push(`El manifest contiene ${duplicateManifestNames.length} nombre(s) de tabla duplicado(s).`);
 
   report.duplicate_inventory_codes = duplicates(inventoryCodes);
   report.duplicate_serial_numbers = duplicates(serialNumbers);
   report.missing_expected_tables = [...EXPECTED_TABLES].filter((name) => !presentExpected.has(name));
 
-  if (report.duplicate_inventory_codes.length) {
-    report.warnings.push(`${report.duplicate_inventory_codes.length} código(s) de inventario se repiten. El importador los preservará, pero deben revisarse después.`);
-  }
-  if (report.duplicate_serial_numbers.length) {
-    report.warnings.push(`${report.duplicate_serial_numbers.length} número(s) de serie se repiten entre las ocho tablas principales.`);
-  }
-  if (report.unmapped_tables.length) {
-    report.warnings.push(`${report.unmapped_tables.length} tabla(s) no tienen transformación automática y quedarán preservadas para reconciliación manual.`);
-  }
-  if (report.missing_expected_tables.length) {
-    report.warnings.push(`No aparecen en el export: ${report.missing_expected_tables.join(", ")}.`);
-  }
+  if (report.duplicate_inventory_codes.length) report.warnings.push(`${report.duplicate_inventory_codes.length} código(s) de inventario se repiten. El importador los preservará y Calidad de datos los señalará.`);
+  if (report.duplicate_serial_numbers.length) report.warnings.push(`${report.duplicate_serial_numbers.length} número(s) de serie se repiten entre las ocho tablas principales.`);
+  if (report.unmapped_tables.length) report.warnings.push(`${report.unmapped_tables.length} tabla(s) no tienen transformación automática y quedarán preservadas para reconciliación manual.`);
+  if (report.missing_expected_tables.length) report.warnings.push(`No aparecen en el export: ${report.missing_expected_tables.join(", ")}.`);
 
   if (jsonOutput) {
     console.log(JSON.stringify(report, null, 2));
@@ -237,9 +275,12 @@ async function main() {
     console.log("\nPreflight Microsoft Access → Inventario Colegio Providencia\n");
     console.log(`Archivo fuente: ${report.source_file || "—"}`);
     console.log(`SHA-256: ${report.source_sha256 || "—"}`);
+    console.log(`SHA revalidado: ${report.source_hash_verified === null ? "no disponible" : report.source_hash_verified ? "sí" : "NO"}`);
     console.log(`Tablas declaradas: ${manifest.tables.length}`);
     console.log(`Filas manifest: ${report.totals.manifest_rows}`);
     console.log(`Filas JSON: ${report.totals.parsed_rows}`);
+    console.log(`IDs explícitos: ${report.totals.explicit_source_ids}`);
+    console.log(`IDs estables generados: ${report.totals.generated_source_ids}`);
     console.log(`Tablas OK: ${report.totals.tables_ok}`);
     console.log(`Tablas con error: ${report.totals.tables_with_errors}`);
     console.log(`Códigos repetidos: ${report.duplicate_inventory_codes.length}`);
