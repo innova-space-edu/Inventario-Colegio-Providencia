@@ -1,10 +1,8 @@
 # Migración del inventario Microsoft Access
 
-La base original se conserva como fuente histórica. La migración está diseñada para ser **repetible, trazable y sin pérdida silenciosa de filas**.
+La base original se conserva como fuente histórica. La migración está diseñada para ser **repetible, trazable, validada antes de escribir y atómica por cada fila transformada**.
 
 ## Estructura recuperada del archivo original
-
-Los formularios y tablas detectados incluyen:
 
 | Tabla Access | Formulario | Mapeo web |
 | --- | --- | --- |
@@ -46,38 +44,23 @@ Si Windows indica que no existe `Microsoft.ACE.OLEDB.16.0` ni `12.0`, se debe in
 
 ## Paso 2 — validar el export antes de tocar Supabase
 
-La validación es local y **no necesita credenciales de Supabase**.
-
 ```bash
 npm run access:validate -- ./access-export
 ```
 
-El preflight comprueba:
+El preflight comprueba manifest, archivos JSON, conteos, identificadores fuente duplicados, códigos de inventario repetidos, números de serie repetidos, tablas sin mapeo y tablas principales ausentes. Los códigos y series repetidos son advertencias porque deben preservarse; errores estructurales bloquean la importación.
 
-- que `manifest.json` sea válido;
-- que todos los JSON declarados existan y puedan leerse;
-- que el número de filas del manifest coincida con cada archivo;
-- identificadores fuente duplicados dentro de una tabla;
-- códigos de inventario repetidos entre las ocho tablas principales;
-- números de serie repetidos;
-- tablas no mapeadas que deberán pasar por reconciliación manual;
-- tablas principales esperadas que no aparezcan en el export.
-
-Los códigos y series repetidos son advertencias porque el sistema está diseñado para conservar el dato legado. Errores estructurales, como JSON inválido, archivo faltante o conteos inconsistentes, bloquean la importación.
-
-Para obtener el informe completo como JSON:
+Para guardar el informe completo:
 
 ```bash
 npm run access:validate -- ./access-export --json > access-preflight-report.json
 ```
 
-No se debe ejecutar la carga si el validador termina con `RESULTADO: NO IMPORTAR todavía.`
+`npm run access:import` vuelve a ejecutar automáticamente este preflight. No existe una ruta normal para saltarse la validación por accidente.
 
 ## Paso 3 — configurar credenciales solo para la migración
 
 Usar variables de entorno de servidor. **Nunca** copiar la clave secreta a código cliente, variables `NEXT_PUBLIC_*` ni incluirla en Git.
-
-PowerShell:
 
 ```powershell
 $env:SUPABASE_URL="https://TU_PROJECT_REF.supabase.co"
@@ -94,17 +77,17 @@ npm run access:import -- ./access-export
 
 La importación:
 
-1. crea `migration_runs`;
-2. conserva cada fila en `legacy_imports` antes de transformarla;
-3. usa `legacy_source + legacy_id` para no duplicar una fila al repetir el proceso;
-4. crea/reutiliza ubicaciones;
-5. inserta el activo y su `legacy_data` completo;
-6. carga detalles especializados de computadores, proyectores y televisores;
-7. registra `asset_history`;
-8. marca la fila legado como `migrated` o `error`;
-9. deja tablas no mapeadas en `pending` para revisión, sin descartarlas.
+1. ejecuta nuevamente el preflight;
+2. crea una ejecución en `migration_runs`;
+3. conserva cada fila en `legacy_imports` antes de transformarla;
+4. respeta filas marcadas administrativamente como `ignored`;
+5. crea o reutiliza ubicaciones;
+6. importa **activo + detalle especializado + historial + estado de la fila legado dentro de una única transacción PostgreSQL**;
+7. usa `legacy_source + legacy_id` para que repetir el proceso no duplique activos;
+8. si una ejecución anterior dejó un activo parcial, una nueva ejecución vuelve a completar/reconciliar sus detalles en vez de marcarlo falsamente como terminado;
+9. deja tablas no mapeadas en `pending` para revisión manual.
 
-Si un `CODIGO` de Access está duplicado y choca con el código único moderno, el activo se conserva igualmente: se importa con `inventory_code = null` y el código original continúa dentro de `legacy_data`.
+Si un `CODIGO` de Access ya está usado, el nuevo activo se conserva igualmente con `inventory_code = null`; el valor histórico continúa intacto dentro de `legacy_data` y aparecerá en calidad/reconciliación para revisión.
 
 ## Reconciliación obligatoria
 
@@ -112,8 +95,10 @@ Al terminar, revisar `/importaciones`, `/importaciones/revision` y `/calidad` y 
 
 - filas de fuente;
 - filas preservadas en `legacy_imports`;
-- activos importados;
+- activos nuevos;
+- activos reconciliados/reparados;
 - pendientes de revisión;
+- filas ignoradas con justificación;
 - errores;
 - duplicados y faltantes detectados por calidad de datos.
 
