@@ -69,28 +69,17 @@ export async function createManagedUser(formData: FormData) {
   let userId: string | undefined;
   if (temporaryPassword) {
     if (temporaryPassword.length < MIN_TEMPORARY_PASSWORD_LENGTH) redirect("/usuarios?error=password_length");
-    const { data, error } = await admin.auth.admin.createUser({
-      email,
-      password: temporaryPassword,
-      email_confirm: true,
-    });
+    const { data, error } = await admin.auth.admin.createUser({ email, password: temporaryPassword, email_confirm: true });
     if (error || !data.user) redirect(`/usuarios?error=${authErrorCode(error, "create")}`);
     userId = data.user.id;
   } else {
     const origin = await requestOrigin();
-    const { data, error } = await admin.auth.admin.inviteUserByEmail(email, {
-      redirectTo: `${origin}/cambiar-clave?invite=1`,
-    });
+    const { data, error } = await admin.auth.admin.inviteUserByEmail(email, { redirectTo: `${origin}/cambiar-clave?invite=1` });
     if (error || !data.user) redirect(`/usuarios?error=${authErrorCode(error, "invite")}`);
     userId = data.user.id;
   }
 
-  const { error: profileError } = await admin.from("profiles").upsert({
-    id: userId,
-    email,
-    role: "user",
-    active: true,
-  });
+  const { error: profileError } = await admin.from("profiles").upsert({ id: userId, email, role: "user", active: true });
   if (profileError) {
     await cleanupFailedUser(admin, userId);
     redirect("/usuarios?error=profile");
@@ -111,10 +100,7 @@ export async function createManagedUser(formData: FormData) {
 }
 
 export async function assignManagedUserRole(formData: FormData) {
-  const { supabase, profile } = await requireRootAdmin();
-  const admin = createAdminClient();
-  if (!admin) redirect("/usuarios?error=server_key");
-
+  const { supabase } = await requireRootAdmin();
   const userId = text(formData, "user_id");
   const roleId = text(formData, "role_id");
   const email = text(formData, "email");
@@ -123,15 +109,11 @@ export async function assignManagedUserRole(formData: FormData) {
   const role = await ensureAssignableRole(supabase, roleId);
   if (!role) redirect("/usuarios?error=role");
 
-  const { error: deleteError } = await admin.from("user_roles").delete().eq("user_id", userId);
-  if (deleteError) redirect("/usuarios?error=assign");
-
-  const { error: insertError } = await admin.from("user_roles").upsert({
-    user_id: userId,
-    role_id: role.id,
-    assigned_by: profile.id,
-  }, { onConflict: "user_id,role_id" });
-  if (insertError) redirect("/usuarios?error=assign");
+  const { error } = await supabase.rpc("replace_user_role_atomic", {
+    p_user_id: userId,
+    p_role_id: role.id,
+  });
+  if (error) redirect("/usuarios?error=assign");
 
   revalidatePath("/usuarios");
   redirect("/usuarios?role_updated=1");
