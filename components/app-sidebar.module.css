@@ -57,3 +57,27 @@
   color: #fff;
   background: rgba(255, 255, 255, 0.08);
 }
+
+.logoutForm {
+  margin: 0;
+}
+
+.logoutNavButton {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  padding: 9px 12px;
+  background: transparent;
+  color: #cfdaea;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.logoutNavButton:hover,
+.logoutNavButton:focus-visible {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.10);
+  outline: none;
+}
