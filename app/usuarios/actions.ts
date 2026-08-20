@@ -6,6 +6,7 @@ import { requireRootAdmin } from "@/lib/auth/require-admin";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 const ROOT_EMAIL = "admin@colprovidencia.cl";
+const MIN_TEMPORARY_PASSWORD_LENGTH = 10;
 
 function text(formData: FormData, key: string) {
   const value = String(formData.get(key) ?? "").trim();
@@ -14,6 +15,14 @@ function text(formData: FormData, key: string) {
 
 function isRootEmail(email: string | null | undefined) {
   return String(email ?? "").toLowerCase() === ROOT_EMAIL;
+}
+
+function authErrorCode(error: { message?: string | null; status?: number } | null | undefined, fallback: string) {
+  const message = String(error?.message ?? "").toLowerCase();
+  if (message.includes("already registered") || message.includes("already been registered") || message.includes("already exists")) return "email_exists";
+  if (message.includes("password")) return "password_policy";
+  if (message.includes("rate limit") || error?.status === 429) return "rate_limit";
+  return fallback;
 }
 
 async function ensureAssignableRole(supabase: Awaited<ReturnType<typeof requireRootAdmin>>["supabase"], roleId: string) {
@@ -26,6 +35,12 @@ async function ensureAssignableRole(supabase: Awaited<ReturnType<typeof requireR
 
   if (!role || role.code === "super_admin") return null;
   return role;
+}
+
+async function cleanupFailedUser(admin: NonNullable<ReturnType<typeof createAdminClient>>, userId: string) {
+  await admin.from("user_roles").delete().eq("user_id", userId);
+  await admin.from("profiles").delete().eq("id", userId);
+  await admin.auth.admin.deleteUser(userId, false);
 }
 
 export async function createManagedUser(formData: FormData) {
@@ -43,17 +58,17 @@ export async function createManagedUser(formData: FormData) {
 
   let userId: string | undefined;
   if (temporaryPassword) {
-    if (temporaryPassword.length < 10) redirect("/usuarios?error=password");
+    if (temporaryPassword.length < MIN_TEMPORARY_PASSWORD_LENGTH) redirect("/usuarios?error=password_length");
     const { data, error } = await admin.auth.admin.createUser({
       email,
       password: temporaryPassword,
       email_confirm: true,
     });
-    if (error || !data.user) redirect("/usuarios?error=create");
+    if (error || !data.user) redirect(`/usuarios?error=${authErrorCode(error, "create")}`);
     userId = data.user.id;
   } else {
     const { data, error } = await admin.auth.admin.inviteUserByEmail(email);
-    if (error || !data.user) redirect("/usuarios?error=invite");
+    if (error || !data.user) redirect(`/usuarios?error=${authErrorCode(error, "invite")}`);
     userId = data.user.id;
   }
 
@@ -63,14 +78,23 @@ export async function createManagedUser(formData: FormData) {
     role: "user",
     active: true,
   });
-  if (profileError) redirect("/usuarios?error=profile");
+  if (profileError) {
+    await cleanupFailedUser(admin, userId);
+    redirect("/usuarios?error=profile");
+  }
 
-  const { error: roleError } = await admin.from("user_roles").insert({
+  // El rol no es exclusivo: la clave compuesta de user_roles permite que
+  // muchos usuarios compartan el mismo role_id. Solo evitamos duplicar la
+  // misma combinación usuario/rol.
+  const { error: roleError } = await admin.from("user_roles").upsert({
     user_id: userId,
     role_id: role.id,
     assigned_by: profile.id,
-  });
-  if (roleError) redirect("/usuarios?error=assign");
+  }, { onConflict: "user_id,role_id" });
+  if (roleError) {
+    await cleanupFailedUser(admin, userId);
+    redirect("/usuarios?error=assign");
+  }
 
   revalidatePath("/usuarios");
   redirect("/usuarios?created=1");
@@ -92,11 +116,11 @@ export async function assignManagedUserRole(formData: FormData) {
   const { error: deleteError } = await admin.from("user_roles").delete().eq("user_id", userId);
   if (deleteError) redirect("/usuarios?error=assign");
 
-  const { error: insertError } = await admin.from("user_roles").insert({
+  const { error: insertError } = await admin.from("user_roles").upsert({
     user_id: userId,
     role_id: role.id,
     assigned_by: profile.id,
-  });
+  }, { onConflict: "user_id,role_id" });
   if (insertError) redirect("/usuarios?error=assign");
 
   revalidatePath("/usuarios");
