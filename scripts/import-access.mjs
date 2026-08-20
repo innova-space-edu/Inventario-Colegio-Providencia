@@ -141,7 +141,7 @@ async function ensureLocation(rawLocation) {
 
 async function findLegacyStage(table, sourceId) {
   const rows = await select("legacy_imports", {
-    select: "id,migration_status,migrated_asset_id,payload",
+    select: "id,migration_status,migrated_asset_id,payload,first_seen_run_id,last_seen_run_id",
     source_table: `eq.${table}`,
     source_id: `eq.${sourceId}`,
     limit: 1,
@@ -149,13 +149,23 @@ async function findLegacyStage(table, sourceId) {
   return rows[0] || null;
 }
 
-async function ensureLegacyStage(table, sourceId, row) {
+async function ensureLegacyStage(table, sourceId, row, currentRunId) {
   const existing = await findLegacyStage(table, sourceId);
   if (existing) {
-    await patch("legacy_imports", { id: `eq.${existing.id}` }, { payload: row });
-    return { ...existing, payload: row };
+    await patch("legacy_imports", { id: `eq.${existing.id}` }, {
+      payload: row,
+      last_seen_run_id: currentRunId,
+    });
+    return { ...existing, payload: row, last_seen_run_id: currentRunId };
   }
-  const created = await insert("legacy_imports", [{ source_table: table, source_id: sourceId, payload: row, migration_status: "pending" }]);
+  const created = await insert("legacy_imports", [{
+    source_table: table,
+    source_id: sourceId,
+    payload: row,
+    migration_status: "pending",
+    first_seen_run_id: currentRunId,
+    last_seen_run_id: currentRunId,
+  }]);
   return created[0];
 }
 
@@ -237,7 +247,7 @@ try {
       const identity = resolveSourceIdentity(row);
       const sourceId = identity.sourceId;
       if (identity.strategy === "content_hash") generatedIdentityRows++;
-      const stage = await ensureLegacyStage(sourceTable, sourceId, row);
+      const stage = await ensureLegacyStage(sourceTable, sourceId, row, runId);
 
       if (stage.migration_status === "ignored") {
         ignoredRows++;
@@ -273,14 +283,25 @@ try {
     }
   }
 
+  const runPreservedRows = await select("legacy_imports", {
+    select: "id",
+    last_seen_run_id: `eq.${runId}`,
+  });
+  const preservedRows = runPreservedRows.length;
+  const preservationOk = preservedRows === sourceRows;
+
   await patch("migration_runs", { id: `eq.${runId}` }, {
-    status: "completed",
+    status: preservationOk && rejectedRows === 0 ? "completed" : "completed_with_review",
     finished_at: new Date().toISOString(),
     source_rows: sourceRows,
     imported_rows: importedRows,
     rejected_rows: rejectedRows,
-    notes: `Importación terminada. Nuevos=${importedRows}; reconciliados=${reconciledRows}; pendientes=${pendingReviewRows}; ignorados=${ignoredRows}; errores=${rejectedRows}; identidades_hash=${generatedIdentityRows}.`,
+    notes: `Importación terminada. preservadas=${preservedRows}/${sourceRows}; nuevos=${importedRows}; reconciliados=${reconciledRows}; pendientes=${pendingReviewRows}; ignorados=${ignoredRows}; errores=${rejectedRows}; identidades_hash=${generatedIdentityRows}.`,
   });
+
+  if (!preservationOk) {
+    throw new Error(`Reconciliación incompleta: la fuente contiene ${sourceRows} filas pero ${preservedRows} quedaron vinculadas a esta ejecución.`);
+  }
 } catch (error) {
   await patch("migration_runs", { id: `eq.${runId}` }, {
     status: "failed",
