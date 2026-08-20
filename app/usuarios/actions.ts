@@ -3,7 +3,7 @@
 import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { requireRootAdmin } from "@/lib/auth/require-admin";
+import { requirePermission, requirePermissions } from "@/lib/auth/require-admin";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 const ROOT_EMAIL = "admin@colprovidencia.cl";
@@ -35,7 +35,9 @@ async function requestOrigin() {
   return "http://localhost:3000";
 }
 
-async function ensureAssignableRole(supabase: Awaited<ReturnType<typeof requireRootAdmin>>["supabase"], roleId: string) {
+type PermissionContext = Awaited<ReturnType<typeof requirePermission>>;
+
+async function ensureAssignableRole(supabase: PermissionContext["supabase"], roleId: string) {
   const { data: role } = await supabase
     .from("app_roles")
     .select("id,code,name,active")
@@ -54,7 +56,7 @@ async function cleanupFailedUser(admin: NonNullable<ReturnType<typeof createAdmi
 }
 
 export async function createManagedUser(formData: FormData) {
-  const { supabase, profile } = await requireRootAdmin();
+  const { supabase } = await requirePermissions(["users.manage", "users.assign_roles"]);
   const admin = createAdminClient();
   if (!admin) redirect("/usuarios?error=server_key");
 
@@ -66,7 +68,7 @@ export async function createManagedUser(formData: FormData) {
   const role = await ensureAssignableRole(supabase, roleId);
   if (!role) redirect("/usuarios?error=role");
 
-  let userId: string | undefined;
+  let userId: string;
   if (temporaryPassword) {
     if (temporaryPassword.length < MIN_TEMPORARY_PASSWORD_LENGTH) redirect("/usuarios?error=password_length");
     const { data, error } = await admin.auth.admin.createUser({ email, password: temporaryPassword, email_confirm: true });
@@ -85,26 +87,25 @@ export async function createManagedUser(formData: FormData) {
     redirect("/usuarios?error=profile");
   }
 
-  const { error: roleError } = await admin.from("user_roles").upsert({
-    user_id: userId,
-    role_id: role.id,
-    assigned_by: profile.id,
-  }, { onConflict: "user_id,role_id" });
+  const { error: roleError } = await supabase.rpc("replace_user_role_atomic", {
+    p_user_id: userId,
+    p_role_id: role.id,
+  });
   if (roleError) {
     await cleanupFailedUser(admin, userId);
     redirect("/usuarios?error=assign");
   }
 
   revalidatePath("/usuarios");
+  revalidatePath("/dashboard");
   redirect("/usuarios?created=1");
 }
 
 export async function assignManagedUserRole(formData: FormData) {
-  const { supabase } = await requireRootAdmin();
+  const { supabase } = await requirePermission("users.assign_roles");
   const userId = text(formData, "user_id");
   const roleId = text(formData, "role_id");
-  const email = text(formData, "email");
-  if (!userId || !roleId || isRootEmail(email)) redirect("/usuarios?error=protected");
+  if (!userId || !roleId) redirect("/usuarios?error=invalid");
 
   const role = await ensureAssignableRole(supabase, roleId);
   if (!role) redirect("/usuarios?error=role");
@@ -113,41 +114,48 @@ export async function assignManagedUserRole(formData: FormData) {
     p_user_id: userId,
     p_role_id: role.id,
   });
-  if (error) redirect("/usuarios?error=assign");
+  if (error) redirect("/usuarios?error=protected");
 
   revalidatePath("/usuarios");
+  revalidatePath("/dashboard");
   redirect("/usuarios?role_updated=1");
 }
 
 export async function setManagedUserActive(formData: FormData) {
-  const { supabase } = await requireRootAdmin();
+  const { supabase } = await requirePermission("users.manage");
   const userId = text(formData, "user_id");
-  const email = text(formData, "email");
   const active = text(formData, "active") === "true";
-  if (!userId || isRootEmail(email)) redirect("/usuarios?error=protected");
+  if (!userId) redirect("/usuarios?error=invalid");
 
-  const { error } = await supabase.from("profiles").update({ active }).eq("id", userId);
-  if (error) redirect("/usuarios?error=status");
+  const { error } = await supabase.rpc("set_managed_user_active_atomic", {
+    p_user_id: userId,
+    p_active: active,
+  });
+  if (error) redirect("/usuarios?error=protected");
 
   revalidatePath("/usuarios");
   redirect(`/usuarios?status=${active ? "enabled" : "disabled"}`);
 }
 
 export async function deleteManagedUser(formData: FormData) {
-  await requireRootAdmin();
+  await requirePermission("users.manage");
   const admin = createAdminClient();
   if (!admin) redirect("/usuarios?error=server_key");
 
   const userId = text(formData, "user_id");
-  const email = text(formData, "email");
   const confirmation = text(formData, "confirmation");
-  if (!userId || !email || isRootEmail(email) || confirmation?.toLowerCase() !== email.toLowerCase()) {
-    redirect("/usuarios?error=delete_confirmation");
-  }
+  if (!userId || !confirmation) redirect("/usuarios?error=delete_confirmation");
+
+  const { data, error: lookupError } = await admin.auth.admin.getUserById(userId);
+  const targetEmail = data.user?.email?.toLowerCase() ?? null;
+  if (lookupError || !targetEmail) redirect("/usuarios?error=delete");
+  if (isRootEmail(targetEmail)) redirect("/usuarios?error=protected");
+  if (confirmation.toLowerCase() !== targetEmail) redirect("/usuarios?error=delete_confirmation");
 
   const { error } = await admin.auth.admin.deleteUser(userId, false);
   if (error) redirect("/usuarios?error=delete");
 
   revalidatePath("/usuarios");
+  revalidatePath("/dashboard");
   redirect("/usuarios?deleted=1");
 }
