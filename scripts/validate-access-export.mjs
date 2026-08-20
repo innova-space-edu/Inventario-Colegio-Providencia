@@ -31,6 +31,14 @@ function clean(value) {
   return normalized === "" ? null : normalized;
 }
 
+function parseJsonText(text) {
+  return JSON.parse(String(text).replace(/^\uFEFF/, ""));
+}
+
+async function readJsonFile(filePath) {
+  return parseJsonText(await fs.readFile(filePath, "utf8"));
+}
+
 function pick(row, ...aliases) {
   const entries = Object.entries(row ?? {}).map(([key, value]) => [canonical(key), value]);
   const wanted = aliases.map(canonical);
@@ -78,7 +86,7 @@ async function main() {
   const manifestPath = path.join(exportDirectory, "manifest.json");
   let manifest;
   try {
-    manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
+    manifest = await readJsonFile(manifestPath);
   } catch (error) {
     console.error(`No fue posible leer ${manifestPath}: ${error instanceof Error ? error.message : String(error)}`);
     process.exit(2);
@@ -180,7 +188,7 @@ async function main() {
 
     let rows;
     try {
-      rows = JSON.parse(await fs.readFile(filePath, "utf8"));
+      rows = await readJsonFile(filePath);
     } catch (error) {
       entry.status = "error";
       report.errors.push(`JSON inválido en ${fileName}: ${error instanceof Error ? error.message : String(error)}`);

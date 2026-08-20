@@ -8,6 +8,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
+$Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
 function Convert-DbValue {
   param([object]$Value)
@@ -30,6 +31,16 @@ function Convert-DbValue {
 function Get-SafeFileName {
   param([string]$Name)
   return ($Name -replace '[^A-Za-z0-9_-]', '_')
+}
+
+function Write-JsonNoBom {
+  param(
+    [Parameter(Mandatory = $true)][string]$Path,
+    [Parameter(Mandatory = $true)][object]$Value
+  )
+
+  $json = ConvertTo-Json -InputObject $Value -Depth 12
+  [System.IO.File]::WriteAllText($Path, $json, $Utf8NoBom)
 }
 
 $resolvedDatabase = (Resolve-Path $DatabasePath).Path
@@ -98,7 +109,7 @@ try {
         $recordset.Close()
       }
 
-      @($rows) | ConvertTo-Json -Depth 12 | Set-Content -Path $outputFile -Encoding UTF8
+      Write-JsonNoBom -Path $outputFile -Value @($rows)
       Write-Host ("Exportada {0}: {1} filas" -f $tableName, $rows.Count) -ForegroundColor Green
     }
     catch {
@@ -157,6 +168,6 @@ $manifest = [ordered]@{
   tables = $manifestTables
 }
 
-$manifest | ConvertTo-Json -Depth 12 | Set-Content -Path (Join-Path $resolvedOutput "manifest.json") -Encoding UTF8
+Write-JsonNoBom -Path (Join-Path $resolvedOutput "manifest.json") -Value $manifest
 Write-Host ("Exportacion terminada: {0}" -f $resolvedOutput) -ForegroundColor Cyan
 Write-Host ("SHA-256: {0}" -f $hash) -ForegroundColor Cyan
