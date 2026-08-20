@@ -22,7 +22,7 @@ export async function createLocation(formData: FormData) {
   const name = text(formData, "name");
   if (!name) redirect("/ubicaciones?error=name");
   const category = locationCategory(formData);
-  const { error } = await supabase.from("locations").insert({
+  const { data, error } = await supabase.from("locations").insert({
     name,
     area: text(formData, "area") ?? defaultArea(category),
     description: text(formData, "description"),
@@ -30,14 +30,17 @@ export async function createLocation(formData: FormData) {
     category,
     display_order: displayOrder(formData),
     selectable: category !== "legacy",
-  });
-  if (error) redirect("/ubicaciones?error=create");
-  revalidatePath("/ubicaciones"); revalidatePath("/inventario"); redirect(`/ubicaciones?tipo=${category}&created=1`);
+  }).select("id").single();
+  if (error || !data) redirect("/ubicaciones?error=create");
+  revalidatePath("/ubicaciones");
+  revalidatePath("/inventario");
+  redirect(`/ubicaciones?tipo=${category}&ubicacion=${data.id}&created=1`);
 }
 
 export async function updateLocation(formData: FormData) {
   const { supabase } = await requirePermission("locations.manage");
-  const id = text(formData, "location_id"); const name = text(formData, "name");
+  const id = text(formData, "location_id");
+  const name = text(formData, "name");
   if (!id || !name) redirect("/ubicaciones?error=missing");
   const active = String(formData.get("active") ?? "true") === "true";
   const category = locationCategory(formData);
@@ -52,7 +55,10 @@ export async function updateLocation(formData: FormData) {
     selectable,
   }).eq("id", id);
   if (error) redirect("/ubicaciones?error=update");
-  revalidatePath("/ubicaciones"); revalidatePath(`/ubicaciones/${id}`); revalidatePath("/inventario"); redirect(`/ubicaciones?tipo=${category}&updated=1`);
+  revalidatePath("/ubicaciones");
+  revalidatePath(`/ubicaciones/${id}`);
+  revalidatePath("/inventario");
+  redirect(`/ubicaciones?tipo=${category}&ubicacion=${id}&updated=1`);
 }
 
 export async function deleteLocation(formData: FormData) {
@@ -64,11 +70,13 @@ export async function deleteLocation(formData: FormData) {
   if (!location) redirect("/ubicaciones?error=not_found");
 
   const { count, error: countError } = await supabase.from("assets").select("id", { count: "exact", head: true }).eq("location_id", id);
-  if (countError) redirect(`/ubicaciones?tipo=${location.category}&error=delete_check`);
-  if ((count ?? 0) > 0) redirect(`/ubicaciones?tipo=${location.category}&error=in_use`);
+  if (countError) redirect(`/ubicaciones?tipo=${location.category}&ubicacion=${id}&error=delete_check`);
+  if ((count ?? 0) > 0) redirect(`/ubicaciones?tipo=${location.category}&ubicacion=${id}&error=in_use`);
 
   const { error } = await supabase.from("locations").delete().eq("id", id);
-  if (error) redirect(`/ubicaciones?tipo=${location.category}&error=delete`);
+  if (error) redirect(`/ubicaciones?tipo=${location.category}&ubicacion=${id}&error=delete`);
 
-  revalidatePath("/ubicaciones"); revalidatePath("/inventario"); redirect(`/ubicaciones?tipo=${location.category}&deleted=1`);
+  revalidatePath("/ubicaciones");
+  revalidatePath("/inventario");
+  redirect(`/ubicaciones?tipo=${location.category}&deleted=1`);
 }
