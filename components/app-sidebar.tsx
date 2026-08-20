@@ -40,8 +40,9 @@ const bottomModules: NavItem[] = [
   { label: "Usuarios", href: "/usuarios", rootOnly: true },
   { label: "Roles y permisos", href: "/roles", rootOnly: true },
   { label: "Configuración", href: "/configuracion", permission: "system.view" },
-  { label: "Mi cuenta", href: "/mi-cuenta" },
 ];
+
+const accountModule: NavItem = { label: "Mi cuenta", href: "/mi-cuenta" };
 
 function isActive(pathname: string, href: string) {
   return href === "/dashboard"
@@ -117,10 +118,14 @@ export function AppSidebar({
         {visibleBottom.map((item) => (
           <Link className={isActive(pathname, item.href) ? "active" : ""} href={item.href} key={item.href}>{item.label}</Link>
         ))}
+
+        <Link className={isActive(pathname, accountModule.href) ? "active" : ""} href={accountModule.href}>{accountModule.label}</Link>
+        <form action={logout} className={styles.logoutForm}>
+          <button className={styles.logoutNavButton} type="submit">Cerrar sesión</button>
+        </form>
       </nav>
       <div className="sidebar-footer">
         <div className="sidebar-user"><span>{isRoot ? "Administrador raíz" : "Usuario autorizado"}</span><strong>{email}</strong></div>
-        <form action={logout}><button className="logout-button" type="submit">Cerrar sesión</button></form>
       </div>
     </aside>
   );
