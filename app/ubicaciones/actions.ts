@@ -5,14 +5,34 @@ import { redirect } from "next/navigation";
 import { requirePermission } from "@/lib/auth/require-admin";
 
 function text(formData: FormData, key: string) { const value = String(formData.get(key) ?? "").trim(); return value || null; }
+function locationCategory(formData: FormData) {
+  const value = String(formData.get("category") ?? "legacy");
+  return ["classroom", "office", "dependency", "legacy"].includes(value) ? value : "legacy";
+}
+function displayOrder(formData: FormData) { const value = Number(formData.get("display_order") ?? 999); return Number.isInteger(value) && value >= 0 ? value : 999; }
+function defaultArea(category: string) {
+  if (category === "classroom") return "Salas de clases";
+  if (category === "office") return "Oficinas";
+  if (category === "dependency") return "Dependencias";
+  return null;
+}
 
 export async function createLocation(formData: FormData) {
   const { supabase } = await requirePermission("locations.manage");
   const name = text(formData, "name");
   if (!name) redirect("/ubicaciones?error=name");
-  const { error } = await supabase.from("locations").insert({ name, area: text(formData, "area"), description: text(formData, "description"), active: true });
+  const category = locationCategory(formData);
+  const { error } = await supabase.from("locations").insert({
+    name,
+    area: text(formData, "area") ?? defaultArea(category),
+    description: text(formData, "description"),
+    active: true,
+    category,
+    display_order: displayOrder(formData),
+    selectable: category !== "legacy",
+  });
   if (error) redirect("/ubicaciones?error=create");
-  revalidatePath("/ubicaciones"); revalidatePath("/inventario"); redirect("/ubicaciones?created=1");
+  revalidatePath("/ubicaciones"); revalidatePath("/inventario"); redirect(`/ubicaciones?tipo=${category}&created=1`);
 }
 
 export async function updateLocation(formData: FormData) {
@@ -20,7 +40,17 @@ export async function updateLocation(formData: FormData) {
   const id = text(formData, "location_id"); const name = text(formData, "name");
   if (!id || !name) redirect("/ubicaciones?error=missing");
   const active = String(formData.get("active") ?? "true") === "true";
-  const { error } = await supabase.from("locations").update({ name, area: text(formData, "area"), description: text(formData, "description"), active }).eq("id", id);
+  const category = locationCategory(formData);
+  const selectable = category === "legacy" ? false : String(formData.get("selectable") ?? "true") === "true";
+  const { error } = await supabase.from("locations").update({
+    name,
+    area: text(formData, "area") ?? defaultArea(category),
+    description: text(formData, "description"),
+    active,
+    category,
+    display_order: displayOrder(formData),
+    selectable,
+  }).eq("id", id);
   if (error) redirect("/ubicaciones?error=update");
-  revalidatePath("/ubicaciones"); revalidatePath("/inventario"); redirect("/ubicaciones?updated=1");
+  revalidatePath("/ubicaciones"); revalidatePath(`/ubicaciones/${id}`); revalidatePath("/inventario"); redirect(`/ubicaciones?tipo=${category}&updated=1`);
 }
