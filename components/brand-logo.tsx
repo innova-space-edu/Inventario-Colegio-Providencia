@@ -3,6 +3,8 @@
 import { useState } from "react";
 import styles from "./brand-logo.module.css";
 
+const LOGO_SRC = "/colegio-logo.jpg?v=20260820-0846";
+
 export function BrandLogo({ variant = "shell" }: { variant?: "shell" | "login" }) {
   const [failed, setFailed] = useState(false);
   const wrapperClass = variant === "login" ? styles.loginLogo : styles.shellLogo;
@@ -16,7 +18,7 @@ export function BrandLogo({ variant = "shell" }: { variant?: "shell" | "login" }
           alt="Logo Colegio Providencia"
           className={styles.logo}
           onError={() => setFailed(true)}
-          src="/colegio-logo.jpg"
+          src={LOGO_SRC}
         />
       )}
     </div>
