@@ -1,0 +1,1 @@
+Logo del panel: public/colegio-logo.jpg
