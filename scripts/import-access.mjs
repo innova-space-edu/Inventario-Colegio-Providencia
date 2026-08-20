@@ -9,9 +9,7 @@ const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 
 function runPreflight() {
   console.log("Validando export de Access antes de importar…");
-  const result = spawnSync(process.execPath, [path.join(scriptDirectory, "validate-access-export.mjs"), exportDirectory], {
-    stdio: "inherit",
-  });
+  const result = spawnSync(process.execPath, [path.join(scriptDirectory, "validate-access-export.mjs"), exportDirectory], { stdio: "inherit" });
   if (result.error) throw result.error;
   if (result.status !== 0) {
     console.error("La validación estructural falló. Supabase no fue modificado.");
@@ -34,24 +32,17 @@ const baseHeaders = { apikey: secretKey, "Content-Type": "application/json" };
 if (secretKey.split(".").length === 3) baseHeaders.Authorization = `Bearer ${secretKey}`;
 
 function canonical(value) {
-  return String(value ?? "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toUpperCase()
-    .replace(/[^A-Z0-9]/g, "");
+  return String(value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
-
 function clean(value) {
   if (value === null || value === undefined) return null;
   const normalized = String(value).trim();
   return normalized === "" ? null : normalized;
 }
-
 function numberOrOne(value) {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : 1;
 }
-
 function pick(row, ...aliases) {
   const entries = Object.entries(row ?? {}).map(([key, value]) => [canonical(key), value]);
   const wanted = aliases.map(canonical);
@@ -72,13 +63,11 @@ async function request(resource, { method = "GET", body, prefer } = {}) {
     headers: { ...baseHeaders, ...(prefer ? { Prefer: prefer } : {}) },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-
   const text = await response.text();
   let payload = null;
   if (text) {
     try { payload = JSON.parse(text); } catch { payload = text; }
   }
-
   if (!response.ok) {
     const error = new Error(`Supabase ${response.status}: ${typeof payload === "string" ? payload : JSON.stringify(payload)}`);
     error.status = response.status;
@@ -93,7 +82,6 @@ function queryString(params) {
   for (const [key, value] of Object.entries(params)) if (value !== null && value !== undefined) search.set(key, String(value));
   return search.toString();
 }
-
 async function select(table, params) { return request(`${table}?${queryString(params)}`); }
 async function insert(table, body, { representation = true } = {}) {
   return request(table, { method: "POST", body, prefer: representation ? "return=representation" : "return=minimal" });
@@ -124,7 +112,6 @@ async function ensureLocation(rawLocation) {
   const key = canonical(name);
   const existing = locationsByName.get(key);
   if (existing) return existing.id;
-
   try {
     const created = await insert("locations", [{ name, legacy_value: name, active: true }]);
     const row = created[0];
@@ -152,10 +139,7 @@ async function findLegacyStage(table, sourceId) {
 async function ensureLegacyStage(table, sourceId, row, currentRunId) {
   const existing = await findLegacyStage(table, sourceId);
   if (existing) {
-    await patch("legacy_imports", { id: `eq.${existing.id}` }, {
-      payload: row,
-      last_seen_run_id: currentRunId,
-    });
+    await patch("legacy_imports", { id: `eq.${existing.id}` }, { payload: row, last_seen_run_id: currentRunId });
     return { ...existing, payload: row, last_seen_run_id: currentRunId };
   }
   const created = await insert("legacy_imports", [{
@@ -175,7 +159,6 @@ function buildAsset(row, familyConfig) {
   const explicitName = clean(pick(row, "NOMBRE"));
   let name = explicitName || accessFamily || familyConfig.fallbackName;
   let assetType = accessFamily;
-
   if (familyConfig.family === "accessory") {
     name = article || name;
     assetType = article || assetType;
@@ -185,7 +168,6 @@ function buildAsset(row, familyConfig) {
   } else if (familyConfig.family === "television") {
     assetType = accessFamily || "TELEVISOR";
   }
-
   return {
     inventory_code: clean(pick(row, "CODIGO", "INVENTARIO")),
     name,
@@ -201,17 +183,11 @@ function buildAsset(row, familyConfig) {
 
 function buildDetails(row, familyCode) {
   if (familyCode === "computer") return {
-    memory: clean(pick(row, "MEMORIA")),
-    storage: clean(pick(row, "DISCO")),
-    screen: clean(pick(row, "PANTALLA")),
-    keyboard: clean(pick(row, "TECLADO")),
-    battery: clean(pick(row, "BATERIA")),
-    charger: clean(pick(row, "CARGADOR")),
+    memory: clean(pick(row, "MEMORIA")), storage: clean(pick(row, "DISCO")), screen: clean(pick(row, "PANTALLA")),
+    keyboard: clean(pick(row, "TECLADO")), battery: clean(pick(row, "BATERIA")), charger: clean(pick(row, "CARGADOR")),
   };
   if (familyCode === "projector") return {
-    lumens: clean(pick(row, "LUMENES")),
-    hdmi: clean(pick(row, "HDMI")),
-    vga: clean(pick(row, "VGA")),
+    lumens: clean(pick(row, "LUMENES")), hdmi: clean(pick(row, "HDMI")), vga: clean(pick(row, "VGA")),
   };
   if (familyCode === "television") return { size: clean(pick(row, "TAMANO", "TAMAÑO", "TAMA")) };
   return {};
@@ -241,8 +217,7 @@ try {
     const resolveSourceIdentity = createSourceIdentityResolver();
     console.log(`\n${sourceTable}: ${rows.length} filas`);
 
-    for (let index = 0; index < rows.length; index++) {
-      const row = rows[index];
+    for (const row of rows) {
       sourceRows++;
       const identity = resolveSourceIdentity(row);
       const sourceId = identity.sourceId;
@@ -253,7 +228,6 @@ try {
         ignoredRows++;
         continue;
       }
-
       if (!mapping) {
         pendingReviewRows++;
         if (stage.migration_status === "error") {
@@ -271,7 +245,6 @@ try {
           p_asset: buildAsset(row, mapping),
           p_details: buildDetails(row, mapping.family),
         });
-
         if (result?.created === true) importedRows++;
         else reconciledRows++;
       } catch (error) {
@@ -283,11 +256,7 @@ try {
     }
   }
 
-  const runPreservedRows = await select("legacy_imports", {
-    select: "id",
-    last_seen_run_id: `eq.${runId}`,
-  });
-  const preservedRows = runPreservedRows.length;
+  const preservedRows = Number(await rpc("count_legacy_rows_for_run", { p_run_id: runId }));
   const preservationOk = preservedRows === sourceRows;
 
   await patch("migration_runs", { id: `eq.${runId}` }, {
