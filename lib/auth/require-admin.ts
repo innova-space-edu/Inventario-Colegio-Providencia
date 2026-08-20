@@ -8,6 +8,8 @@ export type AccessProfile = {
   active: boolean;
 };
 
+type ServerSupabase = Awaited<ReturnType<typeof createClient>>;
+
 export async function requireUser() {
   const supabase = await createClient();
   const { data } = await supabase.auth.getClaims();
@@ -28,8 +30,17 @@ export async function requireUser() {
   return { supabase, profile: profile as AccessProfile };
 }
 
-// Compatibilidad con el código existente. Ya no significa "rol admin":
-// significa usuario autenticado y activo. La autorización fina vive en RLS.
+export async function getPermissionCodes(supabase: ServerSupabase) {
+  const { data, error } = await supabase
+    .from("app_permissions")
+    .select("code")
+    .order("code");
+
+  if (error) return [] as string[];
+  return (data ?? []).map((item) => item.code as string);
+}
+
+// Compatibilidad con módulos existentes. La autorización fina se resuelve con RLS y permisos.
 export async function requireAdmin() {
   return requireUser();
 }
@@ -40,10 +51,7 @@ export async function requirePermission(permission: string) {
     p_permission: permission,
   });
 
-  if (error || data !== true) {
-    redirect("/dashboard?error=forbidden");
-  }
-
+  if (error || data !== true) redirect("/dashboard?error=forbidden");
   return context;
 }
 
@@ -51,9 +59,6 @@ export async function requireRootAdmin() {
   const context = await requireUser();
   const { data, error } = await context.supabase.rpc("is_root_admin");
 
-  if (error || data !== true) {
-    redirect("/dashboard?error=forbidden");
-  }
-
+  if (error || data !== true) redirect("/dashboard?error=forbidden");
   return context;
 }
