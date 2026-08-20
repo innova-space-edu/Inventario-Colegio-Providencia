@@ -30,8 +30,11 @@ export default async function DashboardPage() {
   const permissionSet = new Set(permissions);
   const can = (permission: string) => permissionSet.has(permission);
   const isRoot = rootResult.data === true;
+  const isAdministrator = can("users.manage") && can("roles.view");
   const canInventory = can("inventory.view");
   const canAudit = can("audit.view");
+  const canUsers = can("users.view");
+  const canRoles = can("roles.view");
 
   const [totalResult, activeResult, disposedResult, familiesResult, recentResult] = await Promise.all([
     canInventory ? supabase.from("assets").select("id", { count: "exact", head: true }) : Promise.resolve({ count: 0 }),
@@ -48,7 +51,7 @@ export default async function DashboardPage() {
     <AppShell>
       <header className="topbar">
         <div><h1>Panel principal</h1><p>Centro de control del inventario tecnológico del Colegio Providencia.</p></div>
-        <span className="badge">{isRoot ? "Administrador raíz" : `${permissions.length} permisos`} · {profile.email}</span>
+        <span className="badge">{isRoot ? "Superadministrador" : isAdministrator ? "Administrador" : `${permissions.length} permisos`} · {profile.email}</span>
       </header>
 
       {canInventory ? <section className="stats">
@@ -63,18 +66,18 @@ export default async function DashboardPage() {
         <div className="module-grid">{moduleCards.map(([name, legacy, href]) => <Link className="module-card" href={href} key={name}><strong>{name}</strong><span>Origen Access: {legacy}</span></Link>)}</div>
       </section> : null}
 
-      {(visibleManagement.length > 0 || isRoot) ? <section className="panel">
+      {(visibleManagement.length > 0 || canUsers || canRoles) ? <section className="panel">
         <div className="panel-heading"><div><h2>Gestión y control</h2><p className="muted">Solo aparecen módulos autorizados para esta cuenta.</p></div></div>
         <div className="management-grid">
           {visibleManagement.map((card) => <Link className="management-card" href={card.href} key={card.name}><strong>{card.name}</strong><span>{card.description}</span></Link>)}
-          {isRoot ? <Link className="management-card" href="/usuarios"><strong>Usuarios</strong><span>Cuentas, activación y asignación de roles</span></Link> : null}
-          {isRoot ? <Link className="management-card" href="/roles"><strong>Roles y permisos</strong><span>Crear roles y administrar la matriz de permisos</span></Link> : null}
+          {canUsers ? <Link className="management-card" href="/usuarios"><strong>Usuarios</strong><span>Cuentas, activación y asignación de roles</span></Link> : null}
+          {canRoles ? <Link className="management-card" href="/roles"><strong>Roles y permisos</strong><span>Crear roles y administrar la matriz de permisos</span></Link> : null}
         </div>
       </section> : null}
 
       {canAudit ? <section className="panel"><div className="panel-heading"><div><h2>Actividad reciente</h2><p className="muted">Cambios registrados automáticamente en la base de datos.</p></div></div>{recent.length ? <div className="timeline">{recent.map((event) => <article key={event.id}><div><strong>{event.action} · {event.table_name}</strong><span>{event.record_id || "Sin identificador"}</span></div><time>{formatDate(event.created_at)}</time></article>)}</div> : <div className="empty-state">Aún no hay actividad para mostrar.</div>}</section> : null}
 
-      {!canInventory && visibleManagement.length === 0 && !isRoot ? <section className="panel"><div className="empty-state">Tu cuenta está activa, pero todavía no tiene permisos asignados. Solicita al administrador raíz que te asigne un rol.</div></section> : null}
+      {!canInventory && visibleManagement.length === 0 && !canUsers && !canRoles ? <section className="panel"><div className="empty-state">Tu cuenta está activa, pero todavía no tiene permisos asignados. Solicita a un administrador que te asigne un rol.</div></section> : null}
     </AppShell>
   );
 }
