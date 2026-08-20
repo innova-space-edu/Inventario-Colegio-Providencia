@@ -9,39 +9,38 @@ Reconstrucción web del inventario tecnológico originalmente implementado en Mi
 - Vercel
 - GitHub
 
-## Principios de migración
+## Seguridad y acceso
 
-- El archivo Access original se conserva sin modificaciones.
-- Ningún dato histórico se elimina durante la importación.
-- Los registros importados conservan `legacy_source`, `legacy_id` y `legacy_data`.
-- La antigua columna `FAMILIA` de Access se conserva como `assets.asset_type`; no se confunde con las ocho familias tecnológicas modernas.
-- Los equipos dados de baja se conservan con historial.
-- La importación es repetible mediante identidad legado e historial de ejecuciones.
-- Las filas no transformadas permanecen visibles en el panel de reconciliación y solo pueden ignorarse con una nota administrativa.
+- `admin@colprovidencia.cl` es el administrador raíz protegido.
+- El administrador raíz usa el rol `super_admin` y conserva todos los permisos.
+- Los demás usuarios usan RBAC mediante `app_roles`, `app_permissions`, `role_permissions` y `user_roles`.
+- Roles iniciales: `inventory_manager`, `inventory_operator` y `viewer`; además se pueden crear roles personalizados.
+- Todas las tablas del inventario usan RLS y las operaciones críticas validan permisos en PostgreSQL.
+- Alta, edición, baja y reactivación son transacciones atómicas.
+- No existe registro público en la aplicación.
 
-## Seguridad e integridad
-
-- No existe registro público dentro de la aplicación.
-- Las cuentas se crean exclusivamente desde Supabase Authentication.
-- PostgreSQL permite como máximo un administrador activo.
-- El correo de `public.profiles` debe coincidir con el usuario real de `auth.users`.
-- Todas las tablas del inventario usan RLS.
-- La autorización administrativa se valida contra `public.profiles`.
-- Alta, edición, baja y reactivación de activos se ejecutan mediante transacciones PostgreSQL atómicas.
-- No se debe exponer una `service_role` o secret key en variables `NEXT_PUBLIC_*`.
-
-## Variables de entorno de la aplicación
-
-Crear `.env.local` a partir de `.env.example`:
+## Variables de entorno
 
 ```bash
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
+SUPABASE_SECRET_KEY=
 ```
 
-## Base de datos
+`SUPABASE_SECRET_KEY` es **solo de servidor** y habilita el módulo `/usuarios` para invitar, crear, activar, desactivar y eliminar cuentas mediante Supabase Auth Admin API. Nunca debe usar el prefijo `NEXT_PUBLIC_`, nunca debe enviarse al navegador y nunca debe guardarse con un valor real en Git.
 
-Migraciones principales:
+La aplicación sigue usando la publishable key y RLS para las operaciones normales. La clave secreta se limita a las acciones administrativas de Auth ejecutadas en el servidor.
+
+## Principios de migración Access
+
+- El archivo Access original se conserva sin modificaciones.
+- Ningún dato histórico se elimina durante la importación.
+- Los registros importados conservan `legacy_source`, `legacy_id` y `legacy_data`.
+- La columna `FAMILIA` de Access se conserva como `assets.asset_type`.
+- Los equipos dados de baja se conservan con historial.
+- La importación es repetible y cada fila no transformada permanece en reconciliación.
+
+## Migraciones principales
 
 ```text
 supabase/migrations/20260819180525_initial_inventory_schema.sql
@@ -50,15 +49,17 @@ supabase/migrations/20260819183157_legacy_import_review_workflow.sql
 supabase/migrations/20260819183632_single_admin_identity_hardening.sql
 supabase/migrations/20260819184842_atomic_asset_state_transitions.sql
 supabase/migrations/20260819185236_atomic_asset_create_update.sql
+supabase/migrations/20260820012212_add_user_profile_role.sql
+supabase/migrations/20260820012308_role_based_access_control.sql
+supabase/migrations/20260820012453_protect_root_admin.sql
 ```
 
-## Primer administrador
+## Administración desde la web
 
-1. Crear el usuario manualmente en Supabase → Authentication → Users.
-2. Editar `supabase/setup/01_link_admin_profile.sql` con el correo real.
-3. Ejecutar ese script en SQL Editor.
-
-El script verifica que el correo exista en Auth y, si se cambia de administrador, desactiva el perfil anterior antes de activar el nuevo. La aplicación no implementa `signUp`.
+- `/usuarios`: cuentas de Supabase Auth, activación/desactivación y asignación de rol.
+- `/roles`: creación de roles personalizados y matriz de permisos.
+- `/auditoria`: trazabilidad de cambios del inventario.
+- `/configuracion`: estado del sistema.
 
 ## Desarrollo
 
@@ -69,10 +70,8 @@ npm run dev
 
 ## Migración del archivo Access
 
-El repositorio incluye `scripts/export-access.ps1`, `scripts/import-access.mjs` y `docs/ACCESS_MIGRATION.md`. Después de exportar el `.accdb` en Windows:
+El repositorio incluye `scripts/export-access.ps1`, `scripts/import-access.mjs` y `docs/ACCESS_MIGRATION.md`.
 
 ```bash
 npm run access:import -- ./access-export
 ```
-
-El módulo `/importaciones/revision` permite revisar filas `pending`, `error`, `ignored` y `migrated`, consultar el payload original y documentar explícitamente las exclusiones. `/configuracion` muestra el estado público de la conexión y los controles activos sin exponer secretos. `/calidad` detecta registros incompletos y números de serie duplicados antes de generar informes o cerrar la reconciliación.
