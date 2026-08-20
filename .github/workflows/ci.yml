@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - feat/**
+      - fix/**
   pull_request:
 
 permissions:
@@ -27,21 +28,38 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
-      - name: Check Access validator syntax
-        run: node --check scripts/validate-access-export.mjs
+      - name: Check Access migration scripts syntax
+        run: |
+          node --check scripts/legacy-identity.mjs
+          node --check scripts/validate-access-export.mjs
+          node --check scripts/import-access.mjs
+      - name: Smoke test stable Access identities
+        run: |
+          node --input-type=module - <<'NODE'
+          import { createSourceIdentityResolver } from './scripts/legacy-identity.mjs';
+          const rows = [
+            { CODIGO: 'A-1', MARCA: 'Uno' },
+            { CODIGO: 'B-2', MARCA: 'Dos' },
+            { CODIGO: 'A-1', MARCA: 'Uno' },
+          ];
+          const firstResolver = createSourceIdentityResolver();
+          const secondResolver = createSourceIdentityResolver();
+          const first = rows.map((row) => firstResolver(row).sourceId).sort();
+          const second = [...rows].reverse().map((row) => secondResolver(row).sourceId).sort();
+          if (JSON.stringify(first) !== JSON.stringify(second)) process.exit(1);
+          if (!first.every((id) => id.startsWith('hash-'))) process.exit(1);
+          NODE
       - name: Smoke test Access validator
         run: |
           mkdir -p /tmp/access-preflight
           cat > /tmp/access-preflight/COMPUTADORAS.json <<'JSON'
-          [{"ID":1,"CODIGO":"CP-001","SERIE":"SERIE-001","FAMILIA":"NOTEBOOK"}]
+          [{"CODIGO":"CP-001","SERIE":"SERIE-001","FAMILIA":"NOTEBOOK"}]
           JSON
           cat > /tmp/access-preflight/manifest.json <<'JSON'
           {"source_file":"fixture.accdb","source_sha256":"fixture","tables":[{"name":"COMPUTADORAS","file":"COMPUTADORAS.json","row_count":1,"error":null}]}
           JSON
           node scripts/validate-access-export.mjs /tmp/access-preflight --json > /tmp/access-preflight-report.json
-          node -e 'const r=require("/tmp/access-preflight-report.json"); if(r.errors.length || r.totals.parsed_rows !== 1) process.exit(1)'
-      - name: Check Access importer syntax
-        run: node --check scripts/import-access.mjs
+          node -e 'const r=require("/tmp/access-preflight-report.json"); if(r.errors.length || r.totals.parsed_rows !== 1 || r.totals.generated_source_ids !== 1) process.exit(1)'
       - name: Check Access PowerShell syntax
         shell: pwsh
         run: |
