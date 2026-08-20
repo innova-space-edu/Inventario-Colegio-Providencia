@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { BrandLogo } from "@/components/brand-logo";
 import { login } from "./actions";
 
 type LoginPageProps = {
@@ -20,7 +21,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   return (
     <main className="auth-page">
       <section className="auth-card">
-        <div className="brand-mark">CP</div>
+        <BrandLogo variant="login" />
         <h1>Inventario Tecnológico</h1>
         <p>Colegio Providencia · Acceso autorizado</p>
 
