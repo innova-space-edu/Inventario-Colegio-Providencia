@@ -29,9 +29,17 @@ function Invoke-Checked {
   }
 }
 
+function Resolve-AbsolutePath {
+  param([Parameter(Mandatory = $true)][string]$Value)
+  if ([System.IO.Path]::IsPathRooted($Value)) {
+    return [System.IO.Path]::GetFullPath($Value)
+  }
+  return [System.IO.Path]::GetFullPath((Join-Path (Get-Location).Path $Value))
+}
+
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$resolvedDatabase = [System.IO.Path]::GetFullPath((Join-Path (Get-Location) $DatabasePath))
-$resolvedOutput = [System.IO.Path]::GetFullPath((Join-Path (Get-Location) $OutputDirectory))
+$resolvedDatabase = Resolve-AbsolutePath $DatabasePath
+$resolvedOutput = Resolve-AbsolutePath $OutputDirectory
 
 if (-not (Test-Path $resolvedDatabase -PathType Leaf)) {
   throw "No se encontró la base Access: $resolvedDatabase"
@@ -59,9 +67,6 @@ try {
 
   Write-Host "\n[2/4] Exportando Microsoft Access…" -ForegroundColor Cyan
   & "$PSScriptRoot\export-access.ps1" -DatabasePath $resolvedDatabase -OutputDirectory $resolvedOutput
-  if ($LASTEXITCODE -ne 0) {
-    throw "La exportación de Access falló con código $LASTEXITCODE."
-  }
 
   Write-Host "\n[3/4] Validando el export antes de tocar Supabase…" -ForegroundColor Cyan
   $reportPath = Join-Path $resolvedOutput "access-preflight-report.json"
@@ -86,7 +91,7 @@ try {
   if (-not $Import) {
     Write-Host "\n[4/4] VALIDACIÓN COMPLETADA. No se modificó Supabase." -ForegroundColor Green
     Write-Host "Cuando quieras cargar los datos, repite el comando agregando -Import." -ForegroundColor Cyan
-    exit 0
+    return
   }
 
   if ([string]::IsNullOrWhiteSpace($env:SUPABASE_URL)) {
