@@ -42,15 +42,18 @@ jobs:
           node -e 'const r=require("/tmp/access-preflight-report.json"); if(r.errors.length || r.totals.parsed_rows !== 1) process.exit(1)'
       - name: Check Access importer syntax
         run: node --check scripts/import-access.mjs
-      - name: Check Access exporter syntax
+      - name: Check Access PowerShell syntax
         shell: pwsh
         run: |
-          $tokens = $null
-          $errors = $null
-          [System.Management.Automation.Language.Parser]::ParseFile("scripts/export-access.ps1", [ref]$tokens, [ref]$errors) | Out-Null
-          if ($errors.Count -gt 0) {
-            $errors | ForEach-Object { Write-Error $_.Message }
-            exit 1
+          $files = @("scripts/export-access.ps1", "scripts/migrate-access.ps1")
+          foreach ($file in $files) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($file, [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Error ("{0}: {1}" -f $file, $_.Message) }
+              exit 1
+            }
           }
       - name: Typecheck
         run: npm run typecheck
