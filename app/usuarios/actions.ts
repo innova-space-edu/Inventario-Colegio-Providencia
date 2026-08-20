@@ -1,5 +1,6 @@
 "use server";
 
+import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireRootAdmin } from "@/lib/auth/require-admin";
@@ -23,6 +24,15 @@ function authErrorCode(error: { message?: string | null; status?: number } | nul
   if (message.includes("password")) return "password_policy";
   if (message.includes("rate limit") || error?.status === 429) return "rate_limit";
   return fallback;
+}
+
+async function requestOrigin() {
+  const requestHeaders = await headers();
+  const origin = requestHeaders.get("origin");
+  if (origin) return origin;
+  const productionHost = process.env.VERCEL_PROJECT_PRODUCTION_URL;
+  if (productionHost) return `https://${productionHost}`;
+  return "http://localhost:3000";
 }
 
 async function ensureAssignableRole(supabase: Awaited<ReturnType<typeof requireRootAdmin>>["supabase"], roleId: string) {
@@ -67,7 +77,10 @@ export async function createManagedUser(formData: FormData) {
     if (error || !data.user) redirect(`/usuarios?error=${authErrorCode(error, "create")}`);
     userId = data.user.id;
   } else {
-    const { data, error } = await admin.auth.admin.inviteUserByEmail(email);
+    const origin = await requestOrigin();
+    const { data, error } = await admin.auth.admin.inviteUserByEmail(email, {
+      redirectTo: `${origin}/cambiar-clave?invite=1`,
+    });
     if (error || !data.user) redirect(`/usuarios?error=${authErrorCode(error, "invite")}`);
     userId = data.user.id;
   }
@@ -83,9 +96,6 @@ export async function createManagedUser(formData: FormData) {
     redirect("/usuarios?error=profile");
   }
 
-  // El rol no es exclusivo: la clave compuesta de user_roles permite que
-  // muchos usuarios compartan el mismo role_id. Solo evitamos duplicar la
-  // misma combinación usuario/rol.
   const { error: roleError } = await admin.from("user_roles").upsert({
     user_id: userId,
     role_id: role.id,
