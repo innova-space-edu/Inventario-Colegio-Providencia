@@ -2,7 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { requireRootAdmin } from "@/lib/auth/require-admin";
+import { requirePermission } from "@/lib/auth/require-admin";
+
+const PROTECTED_ROLE_CODES = new Set(["super_admin", "admin"]);
 
 function text(formData: FormData, key: string) {
   const value = String(formData.get(key) ?? "").trim();
@@ -14,11 +16,11 @@ function roleCode(value: string) {
 }
 
 export async function createRole(formData: FormData) {
-  const { supabase, profile } = await requireRootAdmin();
+  const { supabase, profile } = await requirePermission("roles.create");
   const name = text(formData, "name");
   const description = text(formData, "description");
   const code = roleCode(text(formData, "code") || name || "");
-  if (!name || !code || ["super_admin", "admin"].includes(code)) redirect("/roles?error=invalid");
+  if (!name || !code || PROTECTED_ROLE_CODES.has(code)) redirect("/roles?error=invalid");
 
   const { error } = await supabase.from("app_roles").insert({
     code,
@@ -35,7 +37,7 @@ export async function createRole(formData: FormData) {
 }
 
 export async function updateRoleMetadata(formData: FormData) {
-  const { supabase } = await requireRootAdmin();
+  const { supabase } = await requirePermission("roles.edit");
   const roleId = text(formData, "role_id");
   const name = text(formData, "name");
   const description = text(formData, "description");
@@ -43,7 +45,7 @@ export async function updateRoleMetadata(formData: FormData) {
   if (!roleId || !name) redirect("/roles?error=invalid");
 
   const { data: role } = await supabase.from("app_roles").select("code").eq("id", roleId).maybeSingle();
-  if (!role || role.code === "super_admin") redirect("/roles?error=protected");
+  if (!role || PROTECTED_ROLE_CODES.has(role.code)) redirect("/roles?error=protected");
 
   const { error } = await supabase.from("app_roles").update({ name, description, active, updated_at: new Date().toISOString() }).eq("id", roleId);
   if (error) redirect("/roles?error=update");
@@ -53,12 +55,12 @@ export async function updateRoleMetadata(formData: FormData) {
 }
 
 export async function updateRolePermissions(formData: FormData) {
-  const { supabase } = await requireRootAdmin();
+  const { supabase } = await requirePermission("roles.manage_permissions");
   const roleId = text(formData, "role_id");
   if (!roleId) redirect("/roles?error=invalid");
 
   const { data: role } = await supabase.from("app_roles").select("code").eq("id", roleId).maybeSingle();
-  if (!role || role.code === "super_admin") redirect("/roles?error=protected");
+  if (!role || PROTECTED_ROLE_CODES.has(role.code)) redirect("/roles?error=protected");
 
   const requested = [...new Set(formData.getAll("permissions").map((value) => String(value)))];
   const { error } = await supabase.rpc("replace_role_permissions_atomic", {
@@ -73,12 +75,12 @@ export async function updateRolePermissions(formData: FormData) {
 }
 
 export async function deleteRole(formData: FormData) {
-  const { supabase } = await requireRootAdmin();
+  const { supabase } = await requirePermission("roles.delete");
   const roleId = text(formData, "role_id");
   if (!roleId) redirect("/roles?error=invalid");
 
   const { data: role } = await supabase.from("app_roles").select("is_system,code").eq("id", roleId).maybeSingle();
-  if (!role || role.is_system || role.code === "super_admin") redirect("/roles?error=protected");
+  if (!role || role.is_system || PROTECTED_ROLE_CODES.has(role.code)) redirect("/roles?error=protected");
 
   const { count } = await supabase.from("user_roles").select("user_id", { count: "exact", head: true }).eq("role_id", roleId);
   if ((count ?? 0) > 0) redirect("/roles?error=in_use");
