@@ -6,16 +6,11 @@ import { createSourceIdentityResolver } from "./legacy-identity.mjs";
 const exportDirectory = path.resolve(process.argv[2] || "access-export");
 const jsonOutput = process.argv.includes("--json");
 
-const EXPECTED_TABLES = new Set([
-  "COMPUTADORAS",
-  "AUDIO",
-  "MUEBLES",
-  "IMPRESORAS",
-  "PROYECTORES",
-  "VARIOS",
-  "ACCESORIOS",
-  "TELEVISORES",
+const CORE_TABLES = new Set([
+  "COMPUTADORAS", "AUDIO", "MUEBLES", "IMPRESORAS",
+  "PROYECTORES", "VARIOS", "ACCESORIOS", "TELEVISORES",
 ]);
+const DISPOSAL_TABLES = new Set(["BAJADEEQUIPOS", "BAJA", "REGISTROBAJA"]);
 
 function canonical(value) {
   return String(value ?? "")
@@ -24,21 +19,13 @@ function canonical(value) {
     .toUpperCase()
     .replace(/[^A-Z0-9]/g, "");
 }
-
 function clean(value) {
   if (value === null || value === undefined) return null;
   const normalized = String(value).trim();
   return normalized === "" ? null : normalized;
 }
-
-function parseJsonText(text) {
-  return JSON.parse(String(text).replace(/^\uFEFF/, ""));
-}
-
-async function readJsonFile(filePath) {
-  return parseJsonText(await fs.readFile(filePath, "utf8"));
-}
-
+function parseJsonText(text) { return JSON.parse(String(text).replace(/^\uFEFF/, "")); }
+async function readJsonFile(filePath) { return parseJsonText(await fs.readFile(filePath, "utf8")); }
 function pick(row, ...aliases) {
   const entries = Object.entries(row ?? {}).map(([key, value]) => [canonical(key), value]);
   const wanted = aliases.map(canonical);
@@ -52,7 +39,6 @@ function pick(row, ...aliases) {
   }
   return null;
 }
-
 function addOccurrence(map, key, occurrence) {
   if (!key) return;
   const normalized = String(key).trim().toUpperCase();
@@ -61,33 +47,21 @@ function addOccurrence(map, key, occurrence) {
   values.push(occurrence);
   map.set(normalized, values);
 }
-
 async function fileExists(filePath) {
-  try {
-    const stat = await fs.stat(filePath);
-    return stat.isFile();
-  } catch {
-    return false;
-  }
+  try { return (await fs.stat(filePath)).isFile(); } catch { return false; }
 }
-
 async function sha256File(filePath) {
-  const bytes = await fs.readFile(filePath);
-  return createHash("sha256").update(bytes).digest("hex");
+  return createHash("sha256").update(await fs.readFile(filePath)).digest("hex");
 }
-
 function duplicates(map) {
-  return [...map.entries()]
-    .filter(([, occurrences]) => occurrences.length > 1)
-    .map(([value, occurrences]) => ({ value, occurrences }));
+  return [...map.entries()].filter(([, occurrences]) => occurrences.length > 1).map(([value, occurrences]) => ({ value, occurrences }));
 }
 
 async function main() {
   const manifestPath = path.join(exportDirectory, "manifest.json");
   let manifest;
-  try {
-    manifest = await readJsonFile(manifestPath);
-  } catch (error) {
+  try { manifest = await readJsonFile(manifestPath); }
+  catch (error) {
     console.error(`No fue posible leer ${manifestPath}: ${error instanceof Error ? error.message : String(error)}`);
     process.exit(2);
   }
@@ -111,11 +85,14 @@ async function main() {
       tables_with_errors: 0,
       explicit_source_ids: 0,
       generated_source_ids: 0,
+      historical_disposal_rows: 0,
     },
     warnings: [],
     errors: [],
     duplicate_inventory_codes: [],
     duplicate_serial_numbers: [],
+    historical_disposal_tables: [],
+    historical_disposal_candidate_matches: [],
     unmapped_tables: [],
     missing_expected_tables: [],
   };
@@ -124,9 +101,7 @@ async function main() {
     if (await fileExists(manifest.source_path)) {
       const currentHash = await sha256File(manifest.source_path);
       report.source_hash_verified = currentHash.toLowerCase() === String(manifest.source_sha256).toLowerCase();
-      if (!report.source_hash_verified) {
-        report.errors.push("El SHA-256 del archivo Access cambió después de la exportación. Debes volver a exportar antes de importar.");
-      }
+      if (!report.source_hash_verified) report.errors.push("El SHA-256 del archivo Access cambió después de la exportación. Debes volver a exportar antes de importar.");
     } else {
       report.warnings.push("No fue posible reabrir source_path para verificar el SHA-256. Esto es normal si el export fue movido a otro equipo.");
     }
@@ -134,6 +109,7 @@ async function main() {
 
   const inventoryCodes = new Map();
   const serialNumbers = new Map();
+  const disposalReferences = [];
   const presentExpected = new Set();
   const manifestNames = new Map();
 
@@ -142,6 +118,8 @@ async function main() {
     const tableKey = canonical(tableName);
     const declaredRows = Number(table?.row_count ?? 0);
     const fileName = table?.file ? String(table.file) : null;
+    const isCore = CORE_TABLES.has(tableKey);
+    const isDisposal = DISPOSAL_TABLES.has(tableKey);
     const entry = {
       name: tableName,
       file: fileName,
@@ -153,10 +131,12 @@ async function main() {
       identical_row_groups: [],
       status: "ok",
       error: table?.error ?? null,
+      mapping: isCore ? "asset" : isDisposal ? "historical_disposal" : "manual_review",
     };
 
     addOccurrence(manifestNames, tableKey, tableName);
-    if (EXPECTED_TABLES.has(tableKey)) presentExpected.add(tableKey);
+    if (isCore) presentExpected.add(tableKey);
+    else if (isDisposal) report.historical_disposal_tables.push(tableName);
     else report.unmapped_tables.push(tableName || "(sin nombre)");
 
     report.totals.manifest_rows += Number.isFinite(declaredRows) ? declaredRows : 0;
@@ -168,7 +148,6 @@ async function main() {
       report.tables.push(entry);
       continue;
     }
-
     if (!fileName) {
       entry.status = "error";
       report.errors.push(`La tabla ${tableName} no tiene archivo JSON asociado.`);
@@ -187,9 +166,8 @@ async function main() {
     }
 
     let rows;
-    try {
-      rows = await readJsonFile(filePath);
-    } catch (error) {
+    try { rows = await readJsonFile(filePath); }
+    catch (error) {
       entry.status = "error";
       report.errors.push(`JSON inválido en ${fileName}: ${error instanceof Error ? error.message : String(error)}`);
       report.totals.tables_with_errors++;
@@ -207,6 +185,7 @@ async function main() {
 
     entry.parsed_rows = rows.length;
     report.totals.parsed_rows += rows.length;
+    if (isDisposal) report.totals.historical_disposal_rows += rows.length;
 
     if (Number.isFinite(declaredRows) && declaredRows !== rows.length) {
       entry.status = "error";
@@ -238,27 +217,28 @@ async function main() {
         addOccurrence(fingerprints, identity.fingerprint, index + 1);
       }
 
-      if (EXPECTED_TABLES.has(tableKey)) {
-        const inventoryCode = clean(pick(row, "CODIGO", "INVENTARIO"));
-        const serial = clean(pick(row, "SERIE"));
-        addOccurrence(inventoryCodes, inventoryCode, { table: tableName, source_id: sourceId, row: index + 1 });
-        addOccurrence(serialNumbers, serial, { table: tableName, source_id: sourceId, row: index + 1 });
+      if (isCore) {
+        addOccurrence(inventoryCodes, clean(pick(row, "CODIGO", "INVENTARIO")), { table: tableName, source_id: sourceId, row: index + 1 });
+        addOccurrence(serialNumbers, clean(pick(row, "SERIE")), { table: tableName, source_id: sourceId, row: index + 1 });
+      } else if (isDisposal) {
+        disposalReferences.push({
+          table: tableName,
+          source_id: sourceId,
+          row: index + 1,
+          inventory_code: clean(pick(row, "N° INVENTARIO", "Nº INVENTARIO", "INVENTARIO", "CODIGO")),
+          serial_number: clean(pick(row, "N° SERIE", "Nº SERIE", "SERIE")),
+        });
       }
     }
 
     entry.duplicate_source_ids = duplicates(sourceIds);
     entry.identical_row_groups = duplicates(fingerprints);
-
     if (entry.duplicate_source_ids.length) {
       entry.status = "error";
       report.errors.push(`${tableName}: existen ${entry.duplicate_source_ids.length} identificadores ID explícitos duplicados.`);
     }
-    if (entry.generated_source_ids > 0) {
-      report.warnings.push(`${tableName}: ${entry.generated_source_ids} fila(s) no tienen ID explícito; usarán una identidad estable derivada del contenido.`);
-    }
-    if (entry.identical_row_groups.length) {
-      report.warnings.push(`${tableName}: existen ${entry.identical_row_groups.length} grupo(s) de filas completamente idénticas. Se conservará cada ocurrencia por separado.`);
-    }
+    if (entry.generated_source_ids > 0) report.warnings.push(`${tableName}: ${entry.generated_source_ids} fila(s) no tienen ID explícito; usarán una identidad estable derivada del contenido.`);
+    if (entry.identical_row_groups.length) report.warnings.push(`${tableName}: existen ${entry.identical_row_groups.length} grupo(s) de filas completamente idénticas. Se conservará cada ocurrencia por separado.`);
 
     if (entry.status === "ok") report.totals.tables_ok++;
     else report.totals.tables_with_errors++;
@@ -270,10 +250,22 @@ async function main() {
 
   report.duplicate_inventory_codes = duplicates(inventoryCodes);
   report.duplicate_serial_numbers = duplicates(serialNumbers);
-  report.missing_expected_tables = [...EXPECTED_TABLES].filter((name) => !presentExpected.has(name));
+  report.missing_expected_tables = [...CORE_TABLES].filter((name) => !presentExpected.has(name));
+
+  for (const row of disposalReferences) {
+    const matches = new Map();
+    const inventoryKey = row.inventory_code?.toUpperCase();
+    const serialKey = row.serial_number?.toUpperCase();
+    for (const occurrence of inventoryCodes.get(inventoryKey) ?? []) matches.set(`${occurrence.table}:${occurrence.source_id}`, occurrence);
+    for (const occurrence of serialNumbers.get(serialKey) ?? []) matches.set(`${occurrence.table}:${occurrence.source_id}`, occurrence);
+    if (matches.size > 0) {
+      report.historical_disposal_candidate_matches.push({ ...row, candidates: [...matches.values()] });
+    }
+  }
 
   if (report.duplicate_inventory_codes.length) report.warnings.push(`${report.duplicate_inventory_codes.length} código(s) de inventario se repiten. El importador los preservará y Calidad de datos los señalará.`);
   if (report.duplicate_serial_numbers.length) report.warnings.push(`${report.duplicate_serial_numbers.length} número(s) de serie se repiten entre las ocho tablas principales.`);
+  if (report.historical_disposal_candidate_matches.length) report.warnings.push(`${report.historical_disposal_candidate_matches.length} fila(s) de BAJA comparten código o serie exactos con activos principales; quedarán pendientes para reconciliación manual y no se darán de baja automáticamente.`);
   if (report.unmapped_tables.length) report.warnings.push(`${report.unmapped_tables.length} tabla(s) no tienen transformación automática y quedarán preservadas para reconciliación manual.`);
   if (report.missing_expected_tables.length) report.warnings.push(`No aparecen en el export: ${report.missing_expected_tables.join(", ")}.`);
 
@@ -293,7 +285,9 @@ async function main() {
     console.log(`Tablas con error: ${report.totals.tables_with_errors}`);
     console.log(`Códigos repetidos: ${report.duplicate_inventory_codes.length}`);
     console.log(`Series repetidas: ${report.duplicate_serial_numbers.length}`);
-    console.log(`Tablas sin mapeo automático: ${report.unmapped_tables.length}`);
+    console.log(`Filas históricas BAJA soportadas: ${report.totals.historical_disposal_rows}`);
+    console.log(`Bajas con candidato exacto: ${report.historical_disposal_candidate_matches.length}`);
+    console.log(`Tablas realmente sin mapeo: ${report.unmapped_tables.length}`);
 
     if (report.warnings.length) {
       console.log("\nADVERTENCIAS");
