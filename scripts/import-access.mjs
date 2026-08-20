@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { createSourceIdentityResolver } from "./legacy-identity.mjs";
 
 const exportDirectory = path.resolve(process.argv[2] || "access-export");
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -138,10 +139,6 @@ async function ensureLocation(rawLocation) {
   }
 }
 
-function sourceIdentity(row, index) {
-  return clean(pick(row, "ID", "Id")) || `row-${index + 1}`;
-}
-
 async function findLegacyStage(table, sourceId) {
   const rows = await select("legacy_imports", {
     select: "id,migration_status,migrated_asset_id,payload",
@@ -224,18 +221,22 @@ let reconciledRows = 0;
 let rejectedRows = 0;
 let pendingReviewRows = 0;
 let ignoredRows = 0;
+let generatedIdentityRows = 0;
 
 try {
   for (const tableEntry of manifest.tables || []) {
     const sourceTable = String(tableEntry.name || "").trim();
     const rows = JSON.parse(await fs.readFile(path.join(exportDirectory, tableEntry.file), "utf8"));
     const mapping = tableMap[canonical(sourceTable)];
+    const resolveSourceIdentity = createSourceIdentityResolver();
     console.log(`\n${sourceTable}: ${rows.length} filas`);
 
     for (let index = 0; index < rows.length; index++) {
       const row = rows[index];
       sourceRows++;
-      const sourceId = sourceIdentity(row, index);
+      const identity = resolveSourceIdentity(row);
+      const sourceId = identity.sourceId;
+      if (identity.strategy === "content_hash") generatedIdentityRows++;
       const stage = await ensureLegacyStage(sourceTable, sourceId, row);
 
       if (stage.migration_status === "ignored") {
@@ -278,7 +279,7 @@ try {
     source_rows: sourceRows,
     imported_rows: importedRows,
     rejected_rows: rejectedRows,
-    notes: `Importación terminada. Nuevos=${importedRows}; reconciliados=${reconciledRows}; pendientes=${pendingReviewRows}; ignorados=${ignoredRows}; errores=${rejectedRows}.`,
+    notes: `Importación terminada. Nuevos=${importedRows}; reconciliados=${reconciledRows}; pendientes=${pendingReviewRows}; ignorados=${ignoredRows}; errores=${rejectedRows}; identidades_hash=${generatedIdentityRows}.`,
   });
 } catch (error) {
   await patch("migration_runs", { id: `eq.${runId}` }, {
@@ -298,6 +299,7 @@ console.log(`Nuevos activos importados: ${importedRows}`);
 console.log(`Activos reconciliados/reparados: ${reconciledRows}`);
 console.log(`Filas para revisión: ${pendingReviewRows}`);
 console.log(`Filas ignoradas por decisión administrativa: ${ignoredRows}`);
+console.log(`Filas sin ID explícito con identidad estable por hash: ${generatedIdentityRows}`);
 console.log(`Errores: ${rejectedRows}`);
 console.log(`Migration run: ${runId}`);
 
