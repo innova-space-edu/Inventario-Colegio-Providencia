@@ -120,16 +120,13 @@ export async function assignManagedUserRole(formData: FormData) {
 }
 
 export async function setManagedUserActive(formData: FormData) {
-  await requireRootAdmin();
-  const admin = createAdminClient();
-  if (!admin) redirect("/usuarios?error=server_key");
-
+  const { supabase } = await requireRootAdmin();
   const userId = text(formData, "user_id");
   const email = text(formData, "email");
   const active = text(formData, "active") === "true";
   if (!userId || isRootEmail(email)) redirect("/usuarios?error=protected");
 
-  const { error } = await admin.from("profiles").update({ active }).eq("id", userId);
+  const { error } = await supabase.from("profiles").update({ active }).eq("id", userId);
   if (error) redirect("/usuarios?error=status");
 
   revalidatePath("/usuarios");
