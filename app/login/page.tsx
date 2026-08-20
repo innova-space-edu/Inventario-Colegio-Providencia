@@ -25,7 +25,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
         <p>Colegio Providencia · Acceso autorizado</p>
 
         {error ? <div className="error-box">{error}</div> : null}
-        {passwordUpdated ? <div className="success-box">Contraseña actualizada correctamente. Ya puedes iniciar sesión.</div> : null}
+        {passwordUpdated ? <div className="info-box">Contraseña actualizada correctamente. Ya puedes iniciar sesión.</div> : null}
 
         <form action={login}>
           <div className="form-field">
