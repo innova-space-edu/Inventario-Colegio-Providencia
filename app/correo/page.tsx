@@ -17,11 +17,11 @@ export default async function CorreoPage() {
         </div>
         <div className="header-actions">
           <Link className="button button-ghost" href="/dashboard">Volver al panel</Link>
-          <span className="badge">{profile.email}</span>
+          <span className="badge">Cuenta: {profile.email}</span>
         </div>
       </header>
 
-      <EmailComposer senderEmail={profile.email} />
+      <EmailComposer accessEmail={profile.email} />
     </AppShell>
   );
 }
