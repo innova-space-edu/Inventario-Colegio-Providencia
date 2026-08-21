@@ -1,10 +1,13 @@
 .composer {
   display: grid;
   gap: 18px;
+  width: 100%;
+  min-width: 0;
 }
 
 .window {
   overflow: hidden;
+  min-width: 0;
   background: #ffffff;
   border: 1px solid #dfe6ee;
   border-radius: 20px;
@@ -24,6 +27,7 @@
 .windowHead > div {
   display: grid;
   gap: 3px;
+  min-width: 0;
 }
 
 .windowHead strong {
@@ -39,6 +43,10 @@
 }
 
 .sender {
+  min-width: 0;
+  max-width: 48%;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: #527080;
   font-size: 12px;
   white-space: nowrap;
@@ -50,7 +58,7 @@
 
 .fieldRow {
   display: grid;
-  grid-template-columns: 74px 1fr;
+  grid-template-columns: 74px minmax(0, 1fr);
   align-items: center;
   min-height: 50px;
   border-bottom: 1px solid #edf1f5;
@@ -64,6 +72,7 @@
 
 .fieldRow input {
   width: 100%;
+  min-width: 0;
   border: 0;
   outline: 0;
   padding: 13px 0;
@@ -113,6 +122,7 @@
   min-height: 330px;
   padding: 28px 30px;
   outline: 0;
+  overflow-wrap: anywhere;
   background: #fff;
   color: #172033;
   line-height: 1.62;
@@ -169,7 +179,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  max-width: 360px;
+  max-width: min(360px, 100%);
   border: 1px solid #dbe5ec;
   border-radius: 11px;
   padding: 8px 9px 8px 11px;
@@ -216,6 +226,7 @@
 
 .footerActions > div:first-child {
   flex: 1;
+  min-width: 0;
 }
 
 .success {
@@ -231,27 +242,111 @@
   min-width: 150px;
 }
 
+@media (min-width: 1600px) {
+  .windowHead,
+  .fields,
+  .toolbar,
+  .attachments {
+    padding-left: 28px;
+    padding-right: 28px;
+  }
+
+  .editor {
+    min-height: 420px;
+    padding: 34px 36px;
+    font-size: 16px;
+  }
+}
+
+@media (min-width: 761px) and (max-width: 1200px) {
+  .windowHead {
+    align-items: flex-start;
+  }
+
+  .sender {
+    max-width: 42%;
+  }
+
+  .editor {
+    min-height: 300px;
+    padding: 24px;
+  }
+}
+
 @media (max-width: 760px) {
+  .window {
+    border-radius: 15px;
+  }
+
   .windowHead,
   .footerActions {
     align-items: stretch;
     flex-direction: column;
   }
 
+  .windowHead {
+    padding: 15px 16px;
+  }
+
   .sender {
+    max-width: 100%;
     white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .fields {
+    padding: 4px 16px 0;
   }
 
   .fieldRow {
-    grid-template-columns: 58px 1fr;
+    grid-template-columns: 55px minmax(0, 1fr);
+    min-height: 48px;
+  }
+
+  .toolbar {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding: 10px 16px;
+    scrollbar-width: thin;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .toolbar button {
+    flex: 0 0 auto;
+    min-height: 38px;
+  }
+
+  .toolbarSeparator {
+    flex: 0 0 auto;
   }
 
   .editor {
     min-height: 280px;
-    padding: 22px;
+    padding: 20px 17px;
+    font-size: 14px;
+  }
+
+  .attachments {
+    padding: 14px 16px 17px;
+  }
+
+  .attachmentActions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .attachButton {
+    width: 100%;
+  }
+
+  .attachmentChip {
+    width: 100%;
+    max-width: 100%;
+    justify-content: space-between;
   }
 
   .sendButton {
     width: 100%;
+    min-height: 46px;
   }
 }
