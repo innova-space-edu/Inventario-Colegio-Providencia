@@ -70,7 +70,7 @@
   font-weight: 750;
 }
 
-.fieldRow input {
+.fieldRow > input {
   width: 100%;
   min-width: 0;
   border: 0;
@@ -80,8 +80,71 @@
   color: #172033;
 }
 
-.fieldRow input::placeholder {
+.fieldRow > input::placeholder {
   color: #98a2b3;
+}
+
+.recipientInput {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  min-width: 0;
+  padding: 8px 0;
+}
+
+.recipientInput input {
+  flex: 1 1 190px;
+  min-width: 150px;
+  border: 0;
+  outline: 0;
+  padding: 5px 0;
+  background: transparent;
+  color: #172033;
+}
+
+.recipientInput input::placeholder {
+  color: #98a2b3;
+}
+
+.recipientChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 5px 7px 5px 10px;
+  border: 1px solid #b9e7f2;
+  border-radius: 999px;
+  background: #eefcff;
+  color: #075985;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.recipientChip > span {
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recipientChip button {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #0e7490;
+  cursor: pointer;
+  font-size: 17px;
+  line-height: 1;
+}
+
+.recipientChip button:hover {
+  background: #d9f4fb;
 }
 
 .toolbar {
@@ -301,6 +364,20 @@
   .fieldRow {
     grid-template-columns: 55px minmax(0, 1fr);
     min-height: 48px;
+  }
+
+  .recipientInput {
+    gap: 6px;
+    padding: 7px 0;
+  }
+
+  .recipientInput input {
+    flex-basis: 130px;
+    min-width: 110px;
+  }
+
+  .recipientChip > span {
+    max-width: 190px;
   }
 
   .toolbar {
