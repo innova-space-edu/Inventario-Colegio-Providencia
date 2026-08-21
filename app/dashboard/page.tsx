@@ -54,7 +54,7 @@ export default async function DashboardPage() {
         <div className="header-actions">
           <Link
             aria-label="Abrir correo"
-            className="button button-ghost"
+            className="button button-ghost mail-header-button"
             href="/correo"
             style={{ background: "#dff8ff", borderColor: "#b9e7f2", color: "#0e7490" }}
           >
