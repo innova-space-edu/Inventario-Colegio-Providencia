@@ -5,7 +5,7 @@ import styles from "./email-composer.module.css";
 
 const MAX_ATTACHMENT_MB = 20;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[a-z]{2,24}$/i;
-const EMBEDDED_EMAIL_PATTERN = /[a-z0-9._%+-]+@[a-z0-9.-]+?\.[a-z]{2,24}(?=[a-z0-9._%+-]+@|[\s,;]|$)/gi;
+const EMBEDDED_EMAIL_PATTERN = /[a-z0-9._%+-]+@[a-z0-9.-]+?\.(?:cl|com|org|net|edu|gov|io|ai|co|info|biz|me|app|dev|tech|online|school|pro)(?=[a-z0-9._%+-]+@|[\s,;]|$)/gi;
 
 type RecipientFieldProps = {
   label: string;
