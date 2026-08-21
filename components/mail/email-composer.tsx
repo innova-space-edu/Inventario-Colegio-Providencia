@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useRef, useState } from "react";
+import styles from "./email-composer.module.css";
 
 const MAX_ATTACHMENT_MB = 20;
 
@@ -79,46 +80,46 @@ export function EmailComposer({ senderEmail }: { senderEmail: string }) {
   }
 
   return (
-    <form className="mail-composer" onSubmit={handleSubmit}>
-      <section className="mail-window">
-        <div className="mail-window-head">
+    <form className={styles.composer} onSubmit={handleSubmit}>
+      <section className={styles.window}>
+        <div className={styles.windowHead}>
           <div>
-            <span className="mail-eyebrow">Nuevo correo</span>
+            <span className={styles.eyebrow}>Nuevo correo</span>
             <strong>Redactar mensaje</strong>
           </div>
-          <span className="mail-sender">Respuestas a: {senderEmail}</span>
+          <span className={styles.sender}>Respuestas a: {senderEmail}</span>
         </div>
 
-        <div className="mail-fields">
-          <label className="mail-field-row">
+        <div className={styles.fields}>
+          <label className={styles.fieldRow}>
             <span>Para</span>
             <input autoComplete="off" name="to" placeholder="persona@dominio.cl, otra@dominio.cl" required />
           </label>
-          <label className="mail-field-row">
+          <label className={styles.fieldRow}>
             <span>CC</span>
             <input autoComplete="off" name="cc" placeholder="Copia opcional" />
           </label>
-          <label className="mail-field-row">
+          <label className={styles.fieldRow}>
             <span>Asunto</span>
             <input autoComplete="off" maxLength={180} name="subject" placeholder="Asunto del correo" required />
           </label>
         </div>
 
-        <div className="mail-toolbar" aria-label="Herramientas de formato">
+        <div className={styles.toolbar} aria-label="Herramientas de formato">
           <button aria-label="Negrita" onClick={() => runCommand("bold")} title="Negrita" type="button"><strong>B</strong></button>
           <button aria-label="Cursiva" onClick={() => runCommand("italic")} title="Cursiva" type="button"><em>I</em></button>
           <button aria-label="Subrayado" onClick={() => runCommand("underline")} title="Subrayado" type="button"><u>U</u></button>
-          <span className="mail-toolbar-separator" />
+          <span className={styles.toolbarSeparator} />
           <button onClick={() => runCommand("insertUnorderedList")} title="Lista con viñetas" type="button">• Lista</button>
           <button onClick={() => runCommand("insertOrderedList")} title="Lista numerada" type="button">1. Lista</button>
           <button onClick={addLink} title="Insertar enlace" type="button">Enlace</button>
-          <span className="mail-toolbar-separator" />
+          <span className={styles.toolbarSeparator} />
           <button onClick={() => runCommand("removeFormat")} title="Quitar formato" type="button">Limpiar formato</button>
         </div>
 
         <div
           aria-label="Mensaje"
-          className="mail-editor"
+          className={styles.editor}
           contentEditable
           data-placeholder="Escribe aquí el mensaje..."
           ref={editorRef}
@@ -126,9 +127,9 @@ export function EmailComposer({ senderEmail }: { senderEmail: string }) {
           suppressContentEditableWarning
         />
 
-        <div className="mail-attachments">
-          <div className="mail-attachment-actions">
-            <label className="button button-ghost mail-attach-button">
+        <div className={styles.attachments}>
+          <div className={styles.attachmentActions}>
+            <label className={`button button-ghost ${styles.attachButton}`}>
               <span>Adjuntar documentos</span>
               <input
                 accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.png,.jpg,.jpeg,.webp"
@@ -142,9 +143,9 @@ export function EmailComposer({ senderEmail }: { senderEmail: string }) {
           </div>
 
           {attachments.length > 0 ? (
-            <div className="mail-attachment-list">
+            <div className={styles.attachmentList}>
               {attachments.map((file, index) => (
-                <div className="mail-attachment-chip" key={`${file.name}-${file.size}`}>
+                <div className={styles.attachmentChip} key={`${file.name}-${file.size}`}>
                   <span><strong>{file.name}</strong><small>{formatBytes(file.size)}</small></span>
                   <button aria-label={`Quitar ${file.name}`} onClick={() => removeAttachment(index)} type="button">×</button>
                 </div>
@@ -154,11 +155,11 @@ export function EmailComposer({ senderEmail }: { senderEmail: string }) {
         </div>
       </section>
 
-      <div className="mail-footer-actions">
+      <div className={styles.footerActions}>
         <div>
-          {status ? <div className={status.type === "success" ? "mail-success" : "error-box"}>{status.message}</div> : null}
+          {status ? <div className={status.type === "success" ? styles.success : "error-box"}>{status.message}</div> : null}
         </div>
-        <button className="button button-primary mail-send-button" disabled={sending} type="submit">
+        <button className={`button button-primary ${styles.sendButton}`} disabled={sending} type="submit">
           {sending ? "Enviando..." : "Enviar correo"}
         </button>
       </div>
