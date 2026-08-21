@@ -1,9 +1,20 @@
 "use client";
 
-import { FormEvent, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
 import styles from "./email-composer.module.css";
 
 const MAX_ATTACHMENT_MB = 20;
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+type RecipientFieldProps = {
+  label: string;
+  recipients: string[];
+  draft: string;
+  required?: boolean;
+  onDraftChange: (value: string) => void;
+  onRecipientsChange: (value: string[]) => void;
+  onError: (message: string | null) => void;
+};
 
 function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
@@ -11,12 +22,139 @@ function formatBytes(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function EmailComposer({ senderEmail }: { senderEmail: string }) {
+function normalizeEmail(value: string) {
+  return value.trim().replace(/^<|>$/g, "").toLowerCase();
+}
+
+function isValidEmail(value: string) {
+  return EMAIL_PATTERN.test(normalizeEmail(value));
+}
+
+function RecipientField({
+  label,
+  recipients,
+  draft,
+  required,
+  onDraftChange,
+  onRecipientsChange,
+  onError,
+}: RecipientFieldProps) {
+  function addCandidates(values: string[]) {
+    const normalized = values.map(normalizeEmail).filter(Boolean);
+    const invalid = normalized.find((value) => !isValidEmail(value));
+    if (invalid) {
+      onError(`La dirección ${invalid} no parece válida.`);
+      return false;
+    }
+
+    const next = [...new Set([...recipients, ...normalized])];
+    onRecipientsChange(next);
+    onError(null);
+    return true;
+  }
+
+  function commitDraft() {
+    const value = normalizeEmail(draft);
+    if (!value) return true;
+    if (!isValidEmail(value)) return false;
+    const committed = addCandidates([value]);
+    if (committed) onDraftChange("");
+    return committed;
+  }
+
+  useEffect(() => {
+    const value = normalizeEmail(draft);
+    if (!value || !isValidEmail(value)) return;
+
+    const timer = window.setTimeout(() => {
+      if (addCandidates([value])) onDraftChange("");
+    }, 650);
+
+    return () => window.clearTimeout(timer);
+    // El temporizador se reinicia mientras la persona sigue escribiendo.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft]);
+
+  function handleChange(value: string) {
+    // Si se pega o escribe una lista con espacios, comas, punto y coma o saltos,
+    // convertimos automáticamente las direcciones completas en chips.
+    if (/[\s,;\n]/.test(value)) {
+      const parts = value.split(/[\s,;\n]+/).filter(Boolean);
+      const complete = parts.filter(isValidEmail);
+      const remaining = parts.filter((part) => !isValidEmail(part)).join("");
+      if (complete.length) addCandidates(complete);
+      onDraftChange(remaining);
+      return;
+    }
+    onDraftChange(value);
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (["Enter", "Tab", ",", ";"].includes(event.key)) {
+      if (draft.trim()) {
+        event.preventDefault();
+        if (!commitDraft()) onError("Completa una dirección de correo válida.");
+      }
+      return;
+    }
+
+    if (event.key === "Backspace" && !draft && recipients.length) {
+      onRecipientsChange(recipients.slice(0, -1));
+    }
+  }
+
+  return (
+    <div className={styles.fieldRow}>
+      <span>{label}</span>
+      <div className={styles.recipientInput}>
+        {recipients.map((email) => (
+          <span className={styles.recipientChip} key={email}>
+            <span>{email}</span>
+            <button
+              aria-label={`Quitar ${email}`}
+              onClick={() => onRecipientsChange(recipients.filter((item) => item !== email))}
+              type="button"
+            >
+              ×
+            </button>
+          </span>
+        ))}
+        <input
+          aria-label={label}
+          autoCapitalize="none"
+          autoComplete="off"
+          inputMode="email"
+          onBlur={() => {
+            if (draft.trim() && !commitDraft()) onError("Completa una dirección de correo válida.");
+          }}
+          onChange={(event) => handleChange(event.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder={recipients.length ? "Agregar otro correo" : "Escribe o pega un correo"}
+          required={required && recipients.length === 0 && !draft.trim()}
+          spellCheck={false}
+          type="text"
+          value={draft}
+        />
+      </div>
+    </div>
+  );
+}
+
+export function EmailComposer({ accessEmail }: { accessEmail: string }) {
   const editorRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [attachments, setAttachments] = useState<File[]>([]);
+  const [toRecipients, setToRecipients] = useState<string[]>([]);
+  const [ccRecipients, setCcRecipients] = useState<string[]>([]);
+  const [toDraft, setToDraft] = useState("");
+  const [ccDraft, setCcDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [status, setStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
+
+  function setRecipientError(message: string | null) {
+    if (message) setStatus({ type: "error", message });
+    else if (status?.type === "error") setStatus(null);
+  }
 
   function runCommand(command: string, value?: string) {
     editorRef.current?.focus();
@@ -50,14 +188,36 @@ export function EmailComposer({ senderEmail }: { senderEmail: string }) {
     setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index));
   }
 
+  function resolveRecipients(recipients: string[], draft: string) {
+    const pending = normalizeEmail(draft);
+    if (!pending) return recipients;
+    if (!isValidEmail(pending)) return null;
+    return [...new Set([...recipients, pending])];
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const formElement = event.currentTarget;
+    const resolvedTo = resolveRecipients(toRecipients, toDraft);
+    const resolvedCc = resolveRecipients(ccRecipients, ccDraft);
+
+    if (!resolvedTo?.length) {
+      setStatus({ type: "error", message: "Agrega al menos un destinatario válido en Para." });
+      return;
+    }
+    if (!resolvedCc) {
+      setStatus({ type: "error", message: "Revisa la dirección pendiente en CC." });
+      return;
+    }
+
     setSending(true);
     setStatus(null);
 
-    const form = new FormData(event.currentTarget);
+    const form = new FormData(formElement);
     const html = editorRef.current?.innerHTML.trim() ?? "";
     const text = editorRef.current?.innerText.trim() ?? "";
+    form.set("to", resolvedTo.join(","));
+    form.set("cc", resolvedCc.join(","));
     form.set("html", html);
     form.set("text", text);
     attachments.forEach((file) => form.append("attachments", file));
@@ -68,8 +228,12 @@ export function EmailComposer({ senderEmail }: { senderEmail: string }) {
       if (!response.ok) throw new Error(data.error || "No fue posible enviar el correo.");
 
       setStatus({ type: "success", message: `Correo enviado correctamente${data.id ? ` · ID ${data.id}` : ""}.` });
-      event.currentTarget.reset();
+      formElement.reset();
       if (editorRef.current) editorRef.current.innerHTML = "";
+      setToRecipients([]);
+      setCcRecipients([]);
+      setToDraft("");
+      setCcDraft("");
       setAttachments([]);
       if (fileInputRef.current) fileInputRef.current.value = "";
     } catch (error) {
@@ -87,18 +251,27 @@ export function EmailComposer({ senderEmail }: { senderEmail: string }) {
             <span className={styles.eyebrow}>Nuevo correo</span>
             <strong>Redactar mensaje</strong>
           </div>
-          <span className={styles.sender}>Respuestas a: {senderEmail}</span>
+          <span className={styles.sender}>Cuenta de acceso: {accessEmail}</span>
         </div>
 
         <div className={styles.fields}>
-          <label className={styles.fieldRow}>
-            <span>Para</span>
-            <input autoComplete="off" name="to" placeholder="persona@dominio.cl, otra@dominio.cl" required />
-          </label>
-          <label className={styles.fieldRow}>
-            <span>CC</span>
-            <input autoComplete="off" name="cc" placeholder="Copia opcional" />
-          </label>
+          <RecipientField
+            draft={toDraft}
+            label="Para"
+            onDraftChange={setToDraft}
+            onError={setRecipientError}
+            onRecipientsChange={setToRecipients}
+            recipients={toRecipients}
+            required
+          />
+          <RecipientField
+            draft={ccDraft}
+            label="CC"
+            onDraftChange={setCcDraft}
+            onError={setRecipientError}
+            onRecipientsChange={setCcRecipients}
+            recipients={ccRecipients}
+          />
           <label className={styles.fieldRow}>
             <span>Asunto</span>
             <input autoComplete="off" maxLength={180} name="subject" placeholder="Asunto del correo" required />
