@@ -51,7 +51,17 @@ export default async function DashboardPage() {
     <AppShell>
       <header className="topbar">
         <div><h1>Panel principal</h1><p>Centro de control del inventario tecnológico del Colegio Providencia.</p></div>
-        <span className="badge">{isRoot ? "Superadministrador" : isAdministrator ? "Administrador" : `${permissions.length} permisos`} · {profile.email}</span>
+        <div className="header-actions">
+          <Link
+            aria-label="Abrir correo"
+            className="button button-ghost"
+            href="/correo"
+            style={{ background: "#dff8ff", borderColor: "#b9e7f2", color: "#0e7490" }}
+          >
+            ✉ Correo
+          </Link>
+          <span className="badge">{isRoot ? "Superadministrador" : isAdministrator ? "Administrador" : `${permissions.length} permisos`} · {profile.email}</span>
+        </div>
       </header>
 
       {canInventory ? <section className="stats">

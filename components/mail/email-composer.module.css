@@ -1,0 +1,257 @@
+.composer {
+  display: grid;
+  gap: 18px;
+}
+
+.window {
+  overflow: hidden;
+  background: #ffffff;
+  border: 1px solid #dfe6ee;
+  border-radius: 20px;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.07);
+}
+
+.windowHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 18px 22px;
+  background: linear-gradient(135deg, #eefcff, #f8fbff);
+  border-bottom: 1px solid #dce9ef;
+}
+
+.windowHead > div {
+  display: grid;
+  gap: 3px;
+}
+
+.windowHead strong {
+  font-size: 18px;
+}
+
+.eyebrow {
+  color: #0e7490;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.sender {
+  color: #527080;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.fields {
+  padding: 6px 22px 0;
+}
+
+.fieldRow {
+  display: grid;
+  grid-template-columns: 74px 1fr;
+  align-items: center;
+  min-height: 50px;
+  border-bottom: 1px solid #edf1f5;
+}
+
+.fieldRow > span {
+  color: #475467;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.fieldRow input {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  padding: 13px 0;
+  background: transparent;
+  color: #172033;
+}
+
+.fieldRow input::placeholder {
+  color: #98a2b3;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 12px 22px;
+  background: #fbfcfe;
+  border-bottom: 1px solid #e8edf2;
+}
+
+.toolbar button {
+  min-height: 34px;
+  border: 1px solid #d9e0e8;
+  border-radius: 8px;
+  padding: 6px 10px;
+  background: #fff;
+  color: #344054;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.toolbar button:hover {
+  border-color: #97d5e4;
+  background: #f0fbff;
+  color: #075985;
+}
+
+.toolbarSeparator {
+  width: 1px;
+  height: 24px;
+  margin: 0 3px;
+  background: #d8dee7;
+}
+
+.editor {
+  min-height: 330px;
+  padding: 28px 30px;
+  outline: 0;
+  background: #fff;
+  color: #172033;
+  line-height: 1.62;
+  font-size: 15px;
+}
+
+.editor:empty::before {
+  content: attr(data-placeholder);
+  color: #98a2b3;
+  pointer-events: none;
+}
+
+.editor a {
+  color: #0369a1;
+  text-decoration: underline;
+}
+
+.attachments {
+  display: grid;
+  gap: 12px;
+  padding: 16px 22px 20px;
+  border-top: 1px solid #edf1f5;
+  background: #fcfdff;
+}
+
+.attachmentActions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.attachButton {
+  position: relative;
+  overflow: hidden;
+}
+
+.attachButton input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.attachmentList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.attachmentChip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 360px;
+  border: 1px solid #dbe5ec;
+  border-radius: 11px;
+  padding: 8px 9px 8px 11px;
+  background: #fff;
+}
+
+.attachmentChip > span {
+  min-width: 0;
+}
+
+.attachmentChip strong,
+.attachmentChip small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachmentChip strong {
+  font-size: 12px;
+}
+
+.attachmentChip small {
+  margin-top: 2px;
+  color: #667085;
+  font-size: 10px;
+}
+
+.attachmentChip button {
+  border: 0;
+  background: transparent;
+  color: #667085;
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.footerActions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.footerActions > div:first-child {
+  flex: 1;
+}
+
+.success {
+  border: 1px solid #a6f4c5;
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #ecfdf3;
+  color: #027a48;
+  font-size: 13px;
+}
+
+.sendButton {
+  min-width: 150px;
+}
+
+@media (max-width: 760px) {
+  .windowHead,
+  .footerActions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .sender {
+    white-space: normal;
+  }
+
+  .fieldRow {
+    grid-template-columns: 58px 1fr;
+  }
+
+  .editor {
+    min-height: 280px;
+    padding: 22px;
+  }
+
+  .sendButton {
+    width: 100%;
+  }
+}
