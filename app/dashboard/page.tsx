@@ -52,7 +52,14 @@ export default async function DashboardPage() {
       <header className="topbar">
         <div><h1>Panel principal</h1><p>Centro de control del inventario tecnológico del Colegio Providencia.</p></div>
         <div className="header-actions">
-          <Link className="mail-header-button" href="/correo" aria-label="Abrir correo">✉ Correo</Link>
+          <Link
+            aria-label="Abrir correo"
+            className="button button-ghost"
+            href="/correo"
+            style={{ background: "#dff8ff", borderColor: "#b9e7f2", color: "#0e7490" }}
+          >
+            ✉ Correo
+          </Link>
           <span className="badge">{isRoot ? "Superadministrador" : isAdministrator ? "Administrador" : `${permissions.length} permisos`} · {profile.email}</span>
         </div>
       </header>
