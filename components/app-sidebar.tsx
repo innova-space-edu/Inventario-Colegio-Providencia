@@ -60,72 +60,127 @@ export function AppSidebar({
 }) {
   const pathname = usePathname();
   const permissionSet = new Set(permissions);
-  const canSee = (item: NavItem) => {
-    if (!item.permission) return true;
-    return permissionSet.has(item.permission);
-  };
+  const canSee = (item: NavItem) => !item.permission || permissionSet.has(item.permission);
 
   const visibleTop = topModules.filter(canSee);
   const visibleFamilies = familyModules.filter(canSee);
   const visibleBottom = bottomModules.filter(canSee);
   const familyRouteActive = visibleFamilies.some((item) => isActive(pathname, item.href));
   const [familiesOpen, setFamiliesOpen] = useState(familyRouteActive);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const isAdministrator = permissionSet.has("users.manage") && permissionSet.has("roles.view");
 
   useEffect(() => {
     if (familyRouteActive) setFamiliesOpen(true);
   }, [familyRouteActive]);
 
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [mobileOpen]);
+
+  const accountLabel = isRoot
+    ? "Superadministrador"
+    : isAdministrator
+      ? "Administrador"
+      : "Usuario autorizado";
+
   return (
-    <aside className="sidebar">
-      <div className="sidebar-brand">
-        <BrandLogo />
-        <div><strong>Colegio Providencia</strong><span>Inventario TI</span></div>
+    <>
+      <div className={styles.mobileTopbar}>
+        <div className={styles.mobileBrand}>
+          <BrandLogo />
+          <div><strong>Colegio Providencia</strong><span>Inventario TI</span></div>
+        </div>
+        <button
+          aria-controls="inventory-navigation"
+          aria-expanded={mobileOpen}
+          aria-label="Abrir menú de navegación"
+          className={styles.menuButton}
+          onClick={() => setMobileOpen(true)}
+          type="button"
+        >
+          <span aria-hidden="true">☰</span>
+        </button>
       </div>
-      <nav className="nav">
-        {visibleTop.map((item) => (
-          <Link className={isActive(pathname, item.href) ? "active" : ""} href={item.href} key={item.href}>{item.label}</Link>
-        ))}
 
-        {visibleFamilies.length ? (
-          <div className={styles.familyGroup}>
-            <button
-              aria-expanded={familiesOpen}
-              className={`${styles.familyButton} ${familyRouteActive ? styles.familyButtonActive : ""}`}
-              onClick={() => setFamiliesOpen((open) => !open)}
-              type="button"
-            >
-              <span>Familias tecnológicas</span>
-              <span className={`${styles.chevron} ${familiesOpen ? styles.chevronOpen : ""}`} aria-hidden="true">⌄</span>
-            </button>
-            {familiesOpen ? (
-              <div className={styles.familyList}>
-                {visibleFamilies.map((item) => (
-                  <Link
-                    className={isActive(pathname, item.href) ? styles.familyActive : ""}
-                    href={item.href}
-                    key={item.href}
-                  >
-                    {item.label}
-                  </Link>
-                ))}
-              </div>
-            ) : null}
-          </div>
-        ) : null}
+      {mobileOpen ? (
+        <button
+          aria-label="Cerrar menú de navegación"
+          className={styles.backdrop}
+          onClick={() => setMobileOpen(false)}
+          type="button"
+        />
+      ) : null}
 
-        {visibleBottom.map((item) => (
-          <Link className={isActive(pathname, item.href) ? "active" : ""} href={item.href} key={item.href}>{item.label}</Link>
-        ))}
+      <aside
+        className={`sidebar ${styles.sidebarPanel} ${mobileOpen ? styles.sidebarOpen : ""}`}
+        id="inventory-navigation"
+      >
+        <div className={styles.drawerHeader}>
+          <span>Menú</span>
+          <button aria-label="Cerrar menú" onClick={() => setMobileOpen(false)} type="button">×</button>
+        </div>
 
-        <Link className={isActive(pathname, accountModule.href) ? "active" : ""} href={accountModule.href}>{accountModule.label}</Link>
-        <form action={logout} className={styles.logoutForm}>
-          <button className={styles.logoutNavButton} type="submit">Cerrar sesión</button>
-        </form>
-      </nav>
-      <div className="sidebar-footer">
-        <div className="sidebar-user"><span>{isRoot ? "Superadministrador" : isAdministrator ? "Administrador" : "Usuario autorizado"}</span><strong>{email}</strong></div>
-      </div>
-    </aside>
+        <div className="sidebar-brand">
+          <BrandLogo />
+          <div><strong>Colegio Providencia</strong><span>Inventario TI</span></div>
+        </div>
+
+        <nav className="nav">
+          {visibleTop.map((item) => (
+            <Link className={isActive(pathname, item.href) ? "active" : ""} href={item.href} key={item.href}>{item.label}</Link>
+          ))}
+
+          {visibleFamilies.length ? (
+            <div className={styles.familyGroup}>
+              <button
+                aria-expanded={familiesOpen}
+                className={`${styles.familyButton} ${familyRouteActive ? styles.familyButtonActive : ""}`}
+                onClick={() => setFamiliesOpen((open) => !open)}
+                type="button"
+              >
+                <span>Familias tecnológicas</span>
+                <span className={`${styles.chevron} ${familiesOpen ? styles.chevronOpen : ""}`} aria-hidden="true">⌄</span>
+              </button>
+              {familiesOpen ? (
+                <div className={styles.familyList}>
+                  {visibleFamilies.map((item) => (
+                    <Link
+                      className={isActive(pathname, item.href) ? styles.familyActive : ""}
+                      href={item.href}
+                      key={item.href}
+                    >
+                      {item.label}
+                    </Link>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          {visibleBottom.map((item) => (
+            <Link className={isActive(pathname, item.href) ? "active" : ""} href={item.href} key={item.href}>{item.label}</Link>
+          ))}
+
+          <Link className={isActive(pathname, accountModule.href) ? "active" : ""} href={accountModule.href}>{accountModule.label}</Link>
+          <form action={logout} className={styles.logoutForm}>
+            <button className={styles.logoutNavButton} type="submit">Cerrar sesión</button>
+          </form>
+        </nav>
+
+        <div className="sidebar-footer">
+          <div className="sidebar-user"><span>{accountLabel}</span><strong>{email}</strong></div>
+        </div>
+      </aside>
+    </>
   );
 }
