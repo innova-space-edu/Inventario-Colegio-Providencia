@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
 import { EmailComposer } from "@/components/mail/email-composer";
 import { requireUser } from "@/lib/auth/require-admin";
@@ -6,7 +7,10 @@ import { requireUser } from "@/lib/auth/require-admin";
 export const dynamic = "force-dynamic";
 
 export default async function CorreoPage() {
-  const { profile } = await requireUser();
+  const { supabase, profile } = await requireUser();
+  const { data: isRoot } = await supabase.rpc("is_root_admin");
+
+  if (isRoot === true) redirect("/correo/historial");
 
   return (
     <AppShell>
@@ -17,7 +21,7 @@ export default async function CorreoPage() {
         </div>
         <div className="header-actions">
           <Link className="button button-ghost" href="/dashboard">Volver al panel</Link>
-          <span className="badge">Cuenta: {profile.email}</span>
+          <span className="badge">Respuestas a: {profile.email}</span>
         </div>
       </header>
 
