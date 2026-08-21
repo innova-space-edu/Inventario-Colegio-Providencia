@@ -51,9 +51,18 @@ export async function POST(request: Request) {
 
     const resendApiKey = process.env.RESEND_API_KEY;
     const from = process.env.RESEND_EMAIL_FROM || process.env.EMAIL_FROM;
+    const replyTo = process.env.RESEND_REPLY_TO?.trim() || "";
+
     if (!resendApiKey || !from) {
       return NextResponse.json(
         { error: "El servicio de correo todavía no está configurado en Vercel." },
+        { status: 503 },
+      );
+    }
+
+    if (replyTo && !isValidEmail(replyTo)) {
+      return NextResponse.json(
+        { error: "RESEND_REPLY_TO no contiene una dirección válida." },
         { status: 503 },
       );
     }
@@ -106,7 +115,7 @@ export async function POST(request: Request) {
         from,
         to,
         ...(cc.length ? { cc } : {}),
-        reply_to: profile.email,
+        ...(replyTo ? { reply_to: replyTo } : {}),
         subject,
         text: text || undefined,
         html: html || undefined,
