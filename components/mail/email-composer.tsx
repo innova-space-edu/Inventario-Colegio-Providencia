@@ -4,7 +4,8 @@ import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
 import styles from "./email-composer.module.css";
 
 const MAX_ATTACHMENT_MB = 20;
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[a-z]{2,24}$/i;
+const EMBEDDED_EMAIL_PATTERN = /[a-z0-9._%+-]+@[a-z0-9.-]+?\.[a-z]{2,24}(?=[a-z0-9._%+-]+@|[\s,;]|$)/gi;
 
 type RecipientFieldProps = {
   label: string;
@@ -28,6 +29,19 @@ function normalizeEmail(value: string) {
 
 function isValidEmail(value: string) {
   return EMAIL_PATTERN.test(normalizeEmail(value));
+}
+
+function extractEmbeddedEmails(value: string) {
+  const emails: string[] = [];
+  const remainder = value
+    .replace(EMBEDDED_EMAIL_PATTERN, (match) => {
+      emails.push(normalizeEmail(match));
+      return " ";
+    })
+    .replace(/[\s,;]+/g, "")
+    .trim();
+
+  return { emails, remainder };
 }
 
 function RecipientField({
@@ -68,24 +82,24 @@ function RecipientField({
 
     const timer = window.setTimeout(() => {
       if (addCandidates([value])) onDraftChange("");
-    }, 650);
+    }, 600);
 
     return () => window.clearTimeout(timer);
-    // El temporizador se reinicia mientras la persona sigue escribiendo.
+    // Se reinicia mientras el usuario continúa escribiendo.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draft]);
 
   function handleChange(value: string) {
-    // Si se pega o escribe una lista con espacios, comas, punto y coma o saltos,
-    // convertimos automáticamente las direcciones completas en chips.
-    if (/[\s,;\n]/.test(value)) {
-      const parts = value.split(/[\s,;\n]+/).filter(Boolean);
-      const complete = parts.filter(isValidEmail);
-      const remaining = parts.filter((part) => !isValidEmail(part)).join("");
-      if (complete.length) addCandidates(complete);
-      onDraftChange(remaining);
+    const hasSeparator = /[\s,;\n]/.test(value);
+    const atCount = (value.match(/@/g) ?? []).length;
+
+    if (hasSeparator || atCount >= 2) {
+      const extracted = extractEmbeddedEmails(value);
+      if (extracted.emails.length) addCandidates(extracted.emails);
+      onDraftChange(extracted.remainder);
       return;
     }
+
     onDraftChange(value);
   }
 
@@ -251,7 +265,7 @@ export function EmailComposer({ accessEmail }: { accessEmail: string }) {
             <span className={styles.eyebrow}>Nuevo correo</span>
             <strong>Redactar mensaje</strong>
           </div>
-          <span className={styles.sender}>Cuenta de acceso: {accessEmail}</span>
+          <span className={styles.sender}>Respuestas a: {accessEmail}</span>
         </div>
 
         <div className={styles.fields}>
